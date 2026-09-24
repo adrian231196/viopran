@@ -15,7 +15,7 @@
 const FILE_NAME = 'NVP_Finance_Data.json';
 
 // Isi dengan alamat GitHub Pages Anda, mis. 'https://username.github.io/nvp-website/'
-const SITE_URL = 'https://adrian231196.github.io/viopran/';
+const SITE_URL = 'https://viopran.com/';
 
 /** Dipanggil saat URL Web App dibuka di browser. */
 function doGet(e) {
