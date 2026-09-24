@@ -1,0 +1,2225 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PT Nuri Vira Pratama | Viopran Fire Extinguisher</title>
+  <meta name="description" content="PT Nuri Vira Pratama — Viopran Fire Extinguisher. Suplier peralatan proteksi kebakaran: APAR, isi ulang, perawatan berkala, dan sertifikasi.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Barlow+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['"Barlow Condensed"', 'Inter', 'sans-serif'],
+          },
+          colors: {
+            fire: { 50:'#fef2f2', 100:'#fee2e2', 200:'#fecaca', 400:'#f87171', 500:'#ef4444', 600:'#dc2626', 700:'#b91c1c', 800:'#991b1b', 900:'#7f1d1d' },
+            ink: { 900:'#0b0f14', 800:'#111820', 700:'#1a222d', 600:'#2a3441' }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* CSS Khusus Print & PDF agar rapi di A4 */
+    @media print {
+      html, body, #root {
+        background-color: white !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .no-print { display: none !important; }
+      .print-area { box-shadow: none !important; margin: 0 !important; padding: 0 !important; max-width: 100% !important; border: none !important; }
+
+      /* Format A4 & Margin Pas 10mm */
+      @page { size: A4; margin: 10mm; }
+
+      .print-page-break { page-break-after: always; break-after: page; }
+      .print-page-break:last-child { page-break-after: auto; break-after: auto; }
+    }
+
+    /* Anti-potong halaman untuk tabel & kotak transfer */
+    .avoid-break { page-break-inside: avoid !important; break-inside: avoid !important; }
+
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+
+    /* --- Website publik --- */
+    html { scroll-behavior: smooth; }
+    .hero-bg {
+      background:
+        radial-gradient(900px 500px at 78% 30%, rgba(220,38,38,.28), transparent 60%),
+        radial-gradient(600px 400px at 10% 90%, rgba(245,158,11,.10), transparent 60%),
+        #0b0f14;
+    }
+    .grid-lines {
+      background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+    .hazard { background: repeating-linear-gradient(-45deg, #dc2626 0 14px, #0b0f14 14px 28px); }
+    @keyframes floaty { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-10px) } }
+    .floaty { animation: floaty 5s ease-in-out infinite; }
+    @keyframes flicker { 0%,100% { opacity:.55; transform: scale(1) } 50% { opacity:.8; transform: scale(1.06) } }
+    .flicker { animation: flicker 3.2s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .floaty, .flicker { animation: none; } html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased selection:bg-red-200 selection:text-red-900">
+  <div id="root"></div>
+
+  <!-- Konfigurasi (API_URL, LOGO_URL). Lihat README.md -->
+  <script src="config.js"></script>
+
+  <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    // --- ICONS ---
+    const IconDashboard = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>;
+    const IconFileText = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>;
+    const IconTruck = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>;
+    const IconReceipt = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>;
+    const IconTrendingDown = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>;
+    const IconPlus = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
+    const IconTrash2 = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
+    const IconEdit = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
+    const IconX = ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+    const IconWallet = ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>;
+    const IconCalculator = ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>;
+    const IconLogOut = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
+    const IconUser = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+    const IconLock = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>;
+    const IconPrinter = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>;
+    const IconBriefcase = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>;
+    const IconBarChart2 = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
+    const IconLandmark = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="22" x2="21" y2="22"/><line x1="6" y1="18" x2="6" y2="11"/><line x1="10" y1="18" x2="10" y2="11"/><line x1="14" y1="18" x2="14" y2="11"/><line x1="18" y1="18" x2="18" y2="11"/><polygon points="12 2 20 7 4 7"/></svg>;
+    const IconFilter = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>;
+    const IconDownload = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
+    const IconCalendar = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
+    const IconChevronLeft = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
+    const IconChevronRight = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>;
+    const IconAlertCircle = ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>;
+
+    // --- ICONS TAMBAHAN (WEBSITE) ---
+    const IconShield = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>;
+    const IconRefresh = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>;
+    const IconClipboard = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><polyline points="9 14 11 16 15 12"/></svg>;
+    const IconAward = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>;
+    const IconPhone = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
+    const IconMail = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22 6 12 13 2 6"/></svg>;
+    const IconMapPin = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>;
+    const IconMenu = ({size=24}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>;
+    const IconArrowRight = ({size=18}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>;
+    const IconGlobe = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
+    const IconFlame = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>;
+    const IconWhatsApp = ({size=22}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.64.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.88 1.21 3.07.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.63.71.22 1.36.19 1.87.12.57-.09 1.76-.72 2.01-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35M12.05 21.5h-.01a9.4 9.4 0 0 1-4.8-1.31l-.34-.2-3.56.93.95-3.47-.22-.36a9.39 9.39 0 0 1-1.44-5.01c0-5.19 4.23-9.42 9.43-9.42 2.52 0 4.88.98 6.66 2.76a9.36 9.36 0 0 1 2.76 6.67c0 5.2-4.23 9.42-9.43 9.42m8.02-17.44A11.26 11.26 0 0 0 12.05.75C5.8.75.72 5.83.72 12.08c0 2 .52 3.95 1.52 5.66L.62 23.25l5.63-1.48a11.3 11.3 0 0 0 5.8 1.48h.01c6.24 0 11.33-5.08 11.33-11.33 0-3.03-1.18-5.87-3.32-8.01"/></svg>;
+
+    const IconUpload = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+
+    // --- KONFIGURASI (diisi di config.js) ---
+    const CFG = window.NVP_CONFIG || {};
+    const API_URL = String(CFG.API_URL || '').trim();
+
+    // --- VARIABLES ---
+    const LOGO_URL = CFG.LOGO_URL || "https://lh3.googleusercontent.com/d/1b8ugifkonN7WtQcNn74-2hI2ey6WRhkd";
+    const LOGO_FALLBACK = "https://drive.google.com/uc?export=view&id=1b8ugifkonN7WtQcNn74-2hI2ey6WRhkd";
+
+    // --- DATA PERUSAHAAN (untuk website publik; ubah di sini bila ada perubahan) ---
+    const COMPANY = {
+      name: 'PT Nuri Vira Pratama',
+      brand: 'Viopran Fire Extinguisher',
+      tagline: 'Suplier Peralatan Proteksi Kebakaran dan Sertifikasi',
+      address: 'Jln. Raya Penggilingan, Komp. Pasar Lama Komarudin, Kec. Cakung, Jakarta Timur',
+      phone: '0856-7725-758',
+      waNumber: '628567725758',
+      email: 'ptnurivirapratama@gmail.com',
+    };
+    const waLink = (text) => `https://wa.me/${COMPANY.waNumber}?text=${encodeURIComponent(text)}`;
+
+    // --- UTILITIES ---
+    const formatIDR = (number) => {
+      return new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0
+      }).format(number || 0);
+    };
+
+    const renumberDocuments = (array, basePrefix, hasPpn = false) => {
+      const safeArray = array || [];
+      const sortedArray = [...safeArray].sort((a, b) => new Date(a?.date || 0) - new Date(b?.date || 0));
+      const counts = {};
+      const renumberedArray = sortedArray.map(item => {
+        const year = item?.date ? item.date.substring(0, 4) : new Date().getFullYear().toString();
+        let prefix = basePrefix;
+        if (hasPpn) {
+          prefix = item?.usePpn ? `${basePrefix}-PPN` : `${basePrefix}-NON`;
+        }
+        const key = `${year}-${prefix}`;
+        if (!counts[key]) counts[key] = 0;
+        counts[key]++;
+
+        const seq = counts[key].toString().padStart(4, '0');
+        const newId = `${seq}/${prefix}/NVP/APK-SERT/${year}`;
+        return { ...item, id: newId };
+      });
+      return renumberedArray.sort((a, b) => new Date(b?.date || 0) - new Date(a?.date || 0));
+    };
+
+    // =====================================================================
+    // WEBSITE PUBLIK — PT NURI VIRA PRATAMA | VIOPRAN FIRE EXTINGUISHER
+    // =====================================================================
+
+    const ExtinguisherArt = ({ label = 'VIOPRAN', sub = 'ABC POWDER', classes = ['A','B','C'], className = '' }) => (
+      <svg viewBox="0 0 260 440" className={className} role="img" aria-label="Ilustrasi APAR Viopran">
+        <defs>
+          <linearGradient id="bodyGrad" x1="0" x2="1">
+            <stop offset="0" stopColor="#7f1d1d"/><stop offset=".35" stopColor="#dc2626"/><stop offset=".7" stopColor="#b91c1c"/><stop offset="1" stopColor="#6b1111"/>
+          </linearGradient>
+          <linearGradient id="metalGrad" x1="0" x2="1">
+            <stop offset="0" stopColor="#374151"/><stop offset=".5" stopColor="#9ca3af"/><stop offset="1" stopColor="#374151"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="120" cy="420" rx="80" ry="12" fill="#000" opacity=".35"/>
+        {/* hose */}
+        <path d="M150 104 C 232 118, 238 230, 206 300" fill="none" stroke="#111827" strokeWidth="11" strokeLinecap="round"/>
+        <rect x="196" y="296" width="20" height="40" rx="5" fill="#1f2937" transform="rotate(12 206 316)"/>
+        {/* body */}
+        <rect x="58" y="126" width="124" height="286" rx="58" fill="url(#bodyGrad)"/>
+        <rect x="76" y="150" width="14" height="236" rx="7" fill="#fff" opacity=".18"/>
+        {/* label */}
+        <rect x="58" y="214" width="124" height="112" fill="#0b0f14"/>
+        <rect x="58" y="214" width="124" height="6" fill="#f59e0b"/>
+        <text x="120" y="258" textAnchor="middle" fill="#fff" fontFamily="Barlow Condensed, Inter, sans-serif" fontWeight="800" fontSize="30" letterSpacing="2">{label}</text>
+        <text x="120" y="280" textAnchor="middle" fill="#f87171" fontFamily="Inter, sans-serif" fontWeight="700" fontSize="11" letterSpacing="2">{sub}</text>
+        <g fontFamily="Inter, sans-serif" fontWeight="800" fontSize="11" textAnchor="middle">
+          {classes.map((c, i) => {
+            const x = 120 - (classes.length * 22 + (classes.length - 1) * 7) / 2 + i * 29;
+            return <g key={c}><rect x={x} y="292" width="22" height="22" rx="4" fill="#dc2626"/><text x={x + 11} y="307" fill="#fff">{c}</text></g>;
+          })}
+        </g>
+        {/* neck & valve */}
+        <rect x="98" y="100" width="44" height="32" rx="6" fill="url(#metalGrad)"/>
+        <rect x="86" y="74" width="68" height="32" rx="8" fill="#4b5563"/>
+        <path d="M92 78 L 34 58" stroke="#9ca3af" strokeWidth="10" strokeLinecap="round"/>
+        <path d="M148 76 L 204 60" stroke="#6b7280" strokeWidth="10" strokeLinecap="round"/>
+        <circle cx="120" cy="64" r="9" fill="none" stroke="#facc15" strokeWidth="4"/>
+        <circle cx="170" cy="96" r="15" fill="#f8fafc" stroke="#374151" strokeWidth="3"/>
+        <path d="M160 96 A 10 10 0 0 1 176 88" fill="none" stroke="#16a34a" strokeWidth="3"/>
+        <line x1="170" y1="96" x2="177" y2="90" stroke="#111" strokeWidth="2"/>
+      </svg>
+    );
+
+    const PRODUCTS = [
+      { name: 'APAR Dry Chemical Powder', tag: 'Serbaguna', classes: ['A','B','C'], sub: 'ABC POWDER', desc: 'Serbuk kimia kering untuk kebakaran benda padat, cairan mudah terbakar, dan instalasi listrik. Pilihan paling umum untuk rumah, kantor, toko, dan kendaraan.' },
+      { name: 'APAR Carbon Dioxide (CO₂)', tag: 'Tanpa residu', classes: ['B','C'], sub: 'CO2', desc: 'Gas CO₂ tidak meninggalkan residu dan tidak menghantarkan listrik — cocok untuk panel listrik, ruang genset, dan peralatan elektronik.' },
+      { name: 'APAR Foam AFFF', tag: 'Cairan mudah terbakar', classes: ['A','B'], sub: 'FOAM AFFF', desc: 'Busa membentuk lapisan penutup di permukaan cairan — cocok untuk bengkel, gudang BBM, dan area penyimpanan bahan kimia cair.' },
+      { name: 'APAR Clean Agent', tag: 'Ruang sensitif', classes: ['A','B','C'], sub: 'CLEAN AGENT', desc: 'Media gas bersih untuk ruang server, arsip, laboratorium, dan peralatan bernilai tinggi yang harus bebas residu.' },
+      { name: 'APAR Trolley (Beroda)', tag: 'Kapasitas besar', classes: ['A','B','C'], sub: 'TROLLEY', desc: 'Unit beroda berkapasitas besar untuk pabrik, gudang, dan area industri dengan risiko kebakaran tinggi.' },
+      { name: 'Aksesoris & Perlengkapan', tag: 'Pelengkap', classes: [], sub: 'AKSESORIS', desc: 'Bracket dinding, box APAR, tanda/signage, dan kartu inspeksi untuk penempatan yang rapi dan mudah dicek.' },
+    ];
+
+    const FIRE_CLASSES = [
+      { k: 'A', title: 'Benda Padat', ex: 'Kayu, kertas, kain, plastik, karet', color: 'bg-emerald-600' },
+      { k: 'B', title: 'Cairan & Gas', ex: 'Bensin, solar, cat, tiner, LPG', color: 'bg-red-600' },
+      { k: 'C', title: 'Listrik', ex: 'Panel, kabel, mesin & alat bertegangan', color: 'bg-sky-600' },
+      { k: 'D', title: 'Logam', ex: 'Magnesium, serbuk aluminium, natrium — perlu media khusus', color: 'bg-amber-500' },
+    ];
+
+    const SERVICES = [
+      { icon: IconShield, title: 'Pengadaan APAR Viopran', desc: 'Suplai unit baru berbagai media dan kapasitas, lengkap dengan rekomendasi jenis sesuai risiko ruangan.' },
+      { icon: IconRefresh, title: 'Isi Ulang (Refill)', desc: 'Pengisian ulang APAR setelah dipakai atau saat masa media habis, untuk tabung powder, CO₂, dan foam.' },
+      { icon: IconClipboard, title: 'Inspeksi & Perawatan', desc: 'Pengecekan berkala tekanan, segel, pin, selang, dan kondisi tabung — dicatat pada kartu inspeksi.' },
+      { icon: IconAward, title: 'Sertifikasi & Dokumen', desc: 'Pendampingan kelengkapan dokumen dan sertifikasi kelayakan peralatan proteksi kebakaran.' },
+    ];
+
+    const PASS_STEPS = [
+      { k: 'T', title: 'Tarik', desc: 'Tarik pin pengaman dari tuas.' },
+      { k: 'A', title: 'Arahkan', desc: 'Arahkan nozzle ke pangkal api, bukan ke lidah api.' },
+      { k: 'T', title: 'Tekan', desc: 'Tekan tuas perlahan untuk menyemprotkan media.' },
+      { k: 'S', title: 'Sapukan', desc: 'Sapukan dari sisi ke sisi hingga api padam.' },
+    ];
+
+    function Website({ onOpenPortal }) {
+      const [menuOpen, setMenuOpen] = useState(false);
+      const [scrolled, setScrolled] = useState(false);
+      const [form, setForm] = useState({ nama: '', perusahaan: '', kebutuhan: 'Pembelian APAR baru', pesan: '' });
+
+      useEffect(() => {
+        const onScroll = () => setScrolled(window.scrollY > 24);
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+        return () => window.removeEventListener('scroll', onScroll);
+      }, []);
+
+      const go = (id) => {
+        setMenuOpen(false);
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+
+      const NAV = [
+        ['beranda', 'Beranda'], ['produk', 'Produk'], ['layanan', 'Layanan'], ['panduan', 'Panduan APAR'], ['tentang', 'Tentang'], ['kontak', 'Kontak'],
+      ];
+
+      const submitInquiry = (e) => {
+        e.preventDefault();
+        const msg = `Halo ${COMPANY.name}, saya ${form.nama || '-'}${form.perusahaan ? ' dari ' + form.perusahaan : ''}.\nKebutuhan: ${form.kebutuhan}\n${form.pesan}`;
+        window.open(waLink(msg), '_blank', 'noopener');
+      };
+
+      return (
+        <div className="bg-white text-slate-800 font-sans">
+          {/* TOP BAR */}
+          <div className="bg-ink-900 text-slate-400 text-xs border-b border-white/5 hidden md:block">
+            <div className="max-w-7xl mx-auto px-6 h-9 flex items-center justify-between">
+              <div className="flex items-center gap-6">
+                <span className="flex items-center gap-1.5"><IconMapPin size={13}/> Cakung, Jakarta Timur</span>
+                <a href={`mailto:${COMPANY.email}`} className="flex items-center gap-1.5 hover:text-white"><IconMail size={13}/> {COMPANY.email}</a>
+              </div>
+              <a href={waLink('Halo, saya ingin bertanya tentang APAR Viopran.')} target="_blank" rel="noopener" className="flex items-center gap-1.5 hover:text-white font-semibold"><IconPhone size={13}/> {COMPANY.phone}</a>
+            </div>
+          </div>
+
+          {/* NAVBAR */}
+          <header className={`sticky top-0 z-40 transition-all ${scrolled ? 'bg-ink-900/95 backdrop-blur shadow-lg shadow-black/20' : 'bg-ink-900'}`}>
+            <div className="max-w-7xl mx-auto px-4 md:px-6 h-16 md:h-[72px] flex items-center justify-between gap-4">
+              <button onClick={() => go('beranda')} className="flex items-center gap-3 text-left min-w-0">
+                <img src={LOGO_URL} alt="Logo PT Nuri Vira Pratama" className="w-10 h-10 md:w-11 md:h-11 object-contain bg-white rounded-lg p-1 shrink-0" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+                <div className="min-w-0">
+                  <div className="text-white font-black text-sm md:text-[15px] tracking-wide leading-tight truncate">PT NURI VIRA PRATAMA</div>
+                  <div className="text-fire-400 text-[10px] md:text-[11px] font-bold uppercase tracking-[0.2em] truncate">Viopran Fire Extinguisher</div>
+                </div>
+              </button>
+
+              <nav className="hidden lg:flex items-center gap-1">
+                {NAV.map(([id, label]) => (
+                  <button key={id} onClick={() => go(id)} className="px-3 py-2 text-sm font-semibold text-slate-300 hover:text-white rounded-lg hover:bg-white/5">{label}</button>
+                ))}
+              </nav>
+
+              <div className="flex items-center gap-2">
+                <button onClick={onOpenPortal} className="hidden sm:flex items-center gap-2 border border-white/15 text-slate-200 hover:text-white hover:border-white/40 px-4 py-2 rounded-lg text-sm font-bold">
+                  <IconLock size={15}/> Portal Karyawan
+                </button>
+                <a href={waLink('Halo, saya ingin meminta penawaran APAR Viopran.')} target="_blank" rel="noopener" className="hidden md:flex items-center gap-2 bg-fire-600 hover:bg-fire-700 text-white px-4 py-2 rounded-lg text-sm font-bold">
+                  Minta Penawaran
+                </a>
+                <button onClick={() => setMenuOpen(!menuOpen)} className="lg:hidden text-white p-2 rounded-lg hover:bg-white/10" aria-label="Menu">
+                  {menuOpen ? <IconX size={24}/> : <IconMenu size={24}/>}
+                </button>
+              </div>
+            </div>
+            {menuOpen && (
+              <div className="lg:hidden border-t border-white/10 bg-ink-900 px-4 pb-4">
+                {NAV.map(([id, label]) => (
+                  <button key={id} onClick={() => go(id)} className="block w-full text-left py-3 text-slate-200 font-semibold border-b border-white/5">{label}</button>
+                ))}
+                <button onClick={() => { setMenuOpen(false); onOpenPortal(); }} className="mt-4 w-full flex items-center justify-center gap-2 border border-white/20 text-white py-3 rounded-lg font-bold"><IconLock size={16}/> Portal Karyawan</button>
+              </div>
+            )}
+            <div className="hazard h-1 opacity-90"></div>
+          </header>
+
+          {/* HERO */}
+          <section id="beranda" className="hero-bg relative overflow-hidden scroll-mt-20">
+            <div className="absolute inset-0 grid-lines pointer-events-none"></div>
+            <div className="relative max-w-7xl mx-auto px-4 md:px-6 py-16 md:py-24 grid lg:grid-cols-2 gap-12 items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 bg-fire-600/15 border border-fire-600/30 text-fire-400 text-xs font-bold uppercase tracking-[0.18em] px-3 py-1.5 rounded-full">
+                  <IconFlame size={14}/> {COMPANY.tagline}
+                </div>
+                <h1 className="font-display uppercase text-white text-5xl sm:text-6xl xl:text-7xl font-extrabold leading-[0.95] mt-6">
+                  Proteksi kebakaran<br/>yang <span className="text-fire-500">siap</span> saat<br/>dibutuhkan.
+                </h1>
+                <p className="text-slate-300 text-base md:text-lg mt-6 max-w-xl leading-relaxed">
+                  <b className="text-white">Viopran Fire Extinguisher</b> — pengadaan APAR, isi ulang, inspeksi berkala, dan sertifikasi untuk rumah, kantor, gudang, hingga area industri.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 mt-8">
+                  <a href={waLink('Halo, saya ingin meminta penawaran APAR Viopran.')} target="_blank" rel="noopener" className="inline-flex items-center justify-center gap-2 bg-fire-600 hover:bg-fire-700 text-white px-6 py-3.5 rounded-xl font-bold shadow-lg shadow-fire-900/40">
+                    <IconWhatsApp size={20}/> Minta Penawaran
+                  </a>
+                  <button onClick={() => go('produk')} className="inline-flex items-center justify-center gap-2 border border-white/20 hover:border-white/50 text-white px-6 py-3.5 rounded-xl font-bold">
+                    Lihat Produk <IconArrowRight/>
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-4 mt-12 max-w-lg">
+                  {[['4+', 'Jenis media APAR'], ['A–D', 'Kelas kebakaran'], ['1 pintu', 'Beli, refill, sertifikasi']].map(([v, l]) => (
+                    <div key={l} className="border-l-2 border-fire-600 pl-3">
+                      <div className="font-display text-2xl sm:text-3xl font-extrabold text-white whitespace-nowrap">{v}</div>
+                      <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider mt-0.5">{l}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="relative flex justify-center lg:justify-end lg:pr-10">
+                <div className="relative">
+                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 md:w-[420px] md:h-[420px] rounded-full bg-fire-600/30 blur-3xl flicker"></div>
+                <div className="relative floaty">
+                  <ExtinguisherArt className="w-56 md:w-72 drop-shadow-2xl" />
+                </div>
+                <div className="absolute -left-20 md:-left-32 top-24 bg-white/95 backdrop-blur rounded-xl shadow-xl px-4 py-3 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-fire-600 text-white flex items-center justify-center"><IconShield size={18}/></div>
+                  <div><div className="text-xs text-slate-500 font-semibold">Kelas</div><div className="font-black text-slate-900 text-sm">A · B · C</div></div>
+                </div>
+                <div className="absolute -right-6 md:-right-10 bottom-16 bg-white/95 backdrop-blur rounded-xl shadow-xl px-4 py-3 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-ink-900 text-white flex items-center justify-center"><IconRefresh size={18}/></div>
+                  <div><div className="text-xs text-slate-500 font-semibold">Layanan</div><div className="font-black text-slate-900 text-sm">Isi Ulang & Inspeksi</div></div>
+                </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* VALUE STRIP */}
+          <section className="bg-fire-600 text-white">
+            <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-6">
+              {[
+                [IconShield, 'Produk APAR Viopran', 'Berbagai media & kapasitas'],
+                [IconRefresh, 'Isi Ulang & Perawatan', 'Tabung selalu siap pakai'],
+                [IconAward, 'Sertifikasi', 'Pendampingan dokumen'],
+                [IconFileText, 'Administrasi Rapi', 'Penawaran, invoice, surat jalan, kwitansi'],
+              ].map(([Ic, t, d]) => (
+                <div key={t} className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-white/15 flex items-center justify-center shrink-0"><Ic size={20}/></div>
+                  <div><div className="font-bold text-sm">{t}</div><div className="text-xs text-red-100 mt-0.5">{d}</div></div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* PRODUK */}
+          <section id="produk" className="py-20 md:py-28 bg-slate-50 scroll-mt-20">
+            <div className="max-w-7xl mx-auto px-4 md:px-6">
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+                <div>
+                  <p className="text-fire-600 font-bold text-xs uppercase tracking-[0.2em]">Produk Kami</p>
+                  <h2 className="font-display uppercase text-4xl md:text-5xl font-extrabold text-slate-900 mt-2">Lini APAR Viopran</h2>
+                </div>
+                <p className="text-slate-600 max-w-md">Pilih media pemadam sesuai jenis risiko di lokasi Anda. Tim kami siap membantu menentukan jenis, jumlah, dan titik penempatan.</p>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {PRODUCTS.map((p) => (
+                  <div key={p.name} className="group bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all flex flex-col">
+                    <div className="relative h-52 bg-gradient-to-br from-ink-900 to-ink-700 flex items-center justify-center overflow-hidden">
+                      <div className="absolute inset-0 grid-lines"></div>
+                      <div className="absolute w-40 h-40 bg-fire-600/25 blur-2xl rounded-full"></div>
+                      <ExtinguisherArt sub={p.sub} classes={p.classes} className="relative h-44 group-hover:scale-105 transition-transform" />
+                      <span className="absolute top-4 left-4 bg-white/10 border border-white/15 text-white text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full">{p.tag}</span>
+                    </div>
+                    <div className="p-6 flex flex-col flex-1">
+                      <h3 className="font-black text-lg text-slate-900">{p.name}</h3>
+                      <p className="text-sm text-slate-600 mt-2 leading-relaxed flex-1">{p.desc}</p>
+                      <div className="flex items-center justify-between mt-5 pt-5 border-t border-slate-100">
+                        <div className="flex gap-1.5">
+                          {p.classes.length ? p.classes.map(c => (
+                            <span key={c} className="w-7 h-7 rounded-md bg-fire-50 border border-fire-200 text-fire-700 text-xs font-black flex items-center justify-center" title={`Kelas ${c}`}>{c}</span>
+                          )) : <span className="text-xs text-slate-400 font-semibold">Perlengkapan</span>}
+                        </div>
+                        <a href={waLink(`Halo, saya ingin menanyakan harga ${p.name} (Viopran).`)} target="_blank" rel="noopener" className="text-sm font-bold text-fire-600 hover:text-fire-700 flex items-center gap-1">Tanya Harga <IconArrowRight size={16}/></a>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* LAYANAN */}
+          <section id="layanan" className="py-20 md:py-28 bg-white scroll-mt-20">
+            <div className="max-w-7xl mx-auto px-4 md:px-6">
+              <div className="text-center max-w-2xl mx-auto mb-14">
+                <p className="text-fire-600 font-bold text-xs uppercase tracking-[0.2em]">Layanan</p>
+                <h2 className="font-display uppercase text-4xl md:text-5xl font-extrabold text-slate-900 mt-2">Dari pengadaan sampai sertifikasi</h2>
+                <p className="text-slate-600 mt-4">Satu mitra untuk seluruh siklus hidup APAR Anda.</p>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {SERVICES.map(({ icon: Ic, title, desc }, i) => (
+                  <div key={title} className="relative p-6 rounded-2xl border border-slate-200 hover:border-fire-300 hover:bg-fire-50/40 transition-colors">
+                    <div className="absolute top-5 right-5 font-display text-5xl font-extrabold text-slate-100">0{i + 1}</div>
+                    <div className="relative w-12 h-12 rounded-xl bg-fire-600 text-white flex items-center justify-center shadow-lg shadow-fire-600/30"><Ic size={22}/></div>
+                    <h3 className="relative font-black text-slate-900 mt-5">{title}</h3>
+                    <p className="relative text-sm text-slate-600 mt-2 leading-relaxed">{desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Alur kerja */}
+              <div className="mt-16 bg-ink-900 rounded-3xl p-6 md:p-10 text-white relative overflow-hidden">
+                <div className="absolute inset-0 grid-lines"></div>
+                <div className="relative">
+                  <h3 className="font-display uppercase text-2xl md:text-3xl font-extrabold">Alur pemesanan</h3>
+                  <p className="text-slate-400 text-sm mt-1">Setiap transaksi tercatat dengan dokumen resmi perusahaan.</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+                    {[
+                      [IconPhone, 'Konsultasi', 'Hubungi kami via WhatsApp / email'],
+                      [IconBriefcase, 'Penawaran', 'Surat penawaran harga resmi'],
+                      [IconTruck, 'Pengiriman', 'Barang dikirim dengan surat jalan'],
+                      [IconReceipt, 'Invoice & Kwitansi', 'Tagihan & bukti pembayaran'],
+                    ].map(([Ic, t, d], i) => (
+                      <div key={t} className="bg-white/5 border border-white/10 rounded-2xl p-5">
+                        <div className="flex items-center justify-between">
+                          <div className="w-10 h-10 rounded-lg bg-fire-600 flex items-center justify-center"><Ic size={18}/></div>
+                          <span className="font-display text-2xl font-extrabold text-white/20">{i + 1}</span>
+                        </div>
+                        <div className="font-bold mt-4">{t}</div>
+                        <div className="text-xs text-slate-400 mt-1">{d}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* PANDUAN */}
+          <section id="panduan" className="py-20 md:py-28 bg-slate-50 scroll-mt-20">
+            <div className="max-w-7xl mx-auto px-4 md:px-6 grid lg:grid-cols-2 gap-12">
+              <div>
+                <p className="text-fire-600 font-bold text-xs uppercase tracking-[0.2em]">Panduan</p>
+                <h2 className="font-display uppercase text-4xl md:text-5xl font-extrabold text-slate-900 mt-2">Kenali kelas kebakaran</h2>
+                <p className="text-slate-600 mt-4">Jenis APAR harus sesuai dengan jenis bahan yang terbakar. Gunakan tabel ini sebagai acuan awal.</p>
+                <div className="mt-8 space-y-3">
+                  {FIRE_CLASSES.map(c => (
+                    <div key={c.k} className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl p-4">
+                      <div className={`w-12 h-12 rounded-lg ${c.color} text-white font-display text-2xl font-extrabold flex items-center justify-center shrink-0`}>{c.k}</div>
+                      <div><div className="font-black text-slate-900">Kelas {c.k} — {c.title}</div><div className="text-sm text-slate-500 mt-0.5">{c.ex}</div></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-fire-600 font-bold text-xs uppercase tracking-[0.2em]">Cara Pakai</p>
+                <h2 className="font-display uppercase text-4xl md:text-5xl font-extrabold text-slate-900 mt-2">Ingat: T-A-T-S</h2>
+                <p className="text-slate-600 mt-4">Empat langkah sederhana menggunakan APAR dengan benar. Jaga jarak aman sekitar 2–3 meter dari api.</p>
+                <div className="mt-8 grid sm:grid-cols-2 gap-4">
+                  {PASS_STEPS.map((s, i) => (
+                    <div key={i} className="bg-ink-900 text-white rounded-2xl p-6 relative overflow-hidden">
+                      <div className="absolute -right-3 -bottom-6 font-display text-[110px] leading-none font-extrabold text-white/5">{s.k}</div>
+                      <div className="text-fire-400 text-xs font-bold uppercase tracking-widest">Langkah {i + 1}</div>
+                      <div className="font-display uppercase text-3xl font-extrabold mt-1">{s.title}</div>
+                      <p className="text-sm text-slate-300 mt-2 relative">{s.desc}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex items-start gap-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
+                  <IconAlertCircle size={20}/>
+                  <p>Jika api membesar atau asap memenuhi ruangan, segera evakuasi dan hubungi Pemadam Kebakaran di <b>113</b>.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* TENTANG */}
+          <section id="tentang" className="py-20 md:py-28 bg-white scroll-mt-20">
+            <div className="max-w-7xl mx-auto px-4 md:px-6 grid lg:grid-cols-5 gap-12 items-center">
+              <div className="lg:col-span-2">
+                <div className="relative bg-ink-900 rounded-3xl p-10 overflow-hidden">
+                  <div className="absolute inset-0 grid-lines"></div>
+                  <div className="absolute -top-10 -right-10 w-48 h-48 bg-fire-600/40 rounded-full blur-3xl"></div>
+                  <div className="relative bg-white rounded-2xl w-28 h-28 flex items-center justify-center shadow-xl">
+                    <img src={LOGO_URL} alt="Logo" className="w-20 h-20 object-contain" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+                  </div>
+                  <div className="relative mt-8 text-white">
+                    <div className="font-display uppercase text-3xl font-extrabold leading-none">PT Nuri Vira Pratama</div>
+                    <div className="text-fire-400 font-bold text-xs uppercase tracking-[0.2em] mt-2">Viopran Fire Extinguisher</div>
+                  </div>
+                  <div className="hazard h-2 mt-8 rounded-full relative"></div>
+                </div>
+              </div>
+              <div className="lg:col-span-3">
+                <p className="text-fire-600 font-bold text-xs uppercase tracking-[0.2em]">Tentang Kami</p>
+                <h2 className="font-display uppercase text-4xl md:text-5xl font-extrabold text-slate-900 mt-2">Mitra keselamatan dari Jakarta Timur</h2>
+                <p className="text-slate-600 mt-5 leading-relaxed">
+                  PT Nuri Vira Pratama adalah suplier peralatan proteksi kebakaran dan layanan sertifikasi yang berbasis di Cakung, Jakarta Timur. Melalui merek <b>Viopran Fire Extinguisher</b>, kami menyediakan APAR beserta layanan isi ulang, inspeksi, dan perawatan agar setiap tabung selalu siap digunakan.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-4 mt-8">
+                  {[
+                    ['Tepat guna', 'Rekomendasi jenis & jumlah APAR sesuai risiko setiap area.'],
+                    ['Transparan', 'Penawaran, invoice, dan kwitansi resmi untuk setiap transaksi.'],
+                    ['Responsif', 'Konsultasi cepat melalui WhatsApp dan email.'],
+                    ['Berkelanjutan', 'Pengingat isi ulang dan inspeksi berkala.'],
+                  ].map(([t, d]) => (
+                    <div key={t} className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-fire-600 text-white flex items-center justify-center shrink-0 mt-0.5"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+                      <div><div className="font-bold text-slate-900">{t}</div><div className="text-sm text-slate-500">{d}</div></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* KONTAK */}
+          <section id="kontak" className="py-20 md:py-28 hero-bg relative overflow-hidden scroll-mt-20">
+            <div className="absolute inset-0 grid-lines"></div>
+            <div className="relative max-w-7xl mx-auto px-4 md:px-6 grid lg:grid-cols-2 gap-10">
+              <div className="text-white">
+                <p className="text-fire-400 font-bold text-xs uppercase tracking-[0.2em]">Kontak</p>
+                <h2 className="font-display uppercase text-4xl md:text-5xl font-extrabold mt-2">Butuh APAR atau isi ulang?</h2>
+                <p className="text-slate-300 mt-4 max-w-md">Kirim kebutuhan Anda, tim kami akan membalas dengan penawaran resmi.</p>
+                <div className="mt-8 space-y-4">
+                  <a href={waLink('Halo, saya ingin bertanya tentang APAR Viopran.')} target="_blank" rel="noopener" className="flex items-center gap-4 bg-white/5 border border-white/10 hover:border-fire-500/60 rounded-2xl p-4">
+                    <div className="w-11 h-11 rounded-xl bg-fire-600 flex items-center justify-center shrink-0"><IconPhone size={20}/></div>
+                    <div><div className="text-xs text-slate-400 font-semibold">Telepon / WhatsApp</div><div className="font-bold">{COMPANY.phone}</div></div>
+                  </a>
+                  <a href={`mailto:${COMPANY.email}`} className="flex items-center gap-4 bg-white/5 border border-white/10 hover:border-fire-500/60 rounded-2xl p-4">
+                    <div className="w-11 h-11 rounded-xl bg-fire-600 flex items-center justify-center shrink-0"><IconMail size={20}/></div>
+                    <div className="min-w-0"><div className="text-xs text-slate-400 font-semibold">Email</div><div className="font-bold break-all">{COMPANY.email}</div></div>
+                  </a>
+                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(COMPANY.address)}`} target="_blank" rel="noopener" className="flex items-center gap-4 bg-white/5 border border-white/10 hover:border-fire-500/60 rounded-2xl p-4">
+                    <div className="w-11 h-11 rounded-xl bg-fire-600 flex items-center justify-center shrink-0"><IconMapPin size={20}/></div>
+                    <div><div className="text-xs text-slate-400 font-semibold">Alamat</div><div className="font-bold text-sm">{COMPANY.address}</div></div>
+                  </a>
+                </div>
+              </div>
+
+              <form onSubmit={submitInquiry} className="bg-white rounded-3xl p-6 md:p-8 shadow-2xl">
+                <h3 className="font-black text-xl text-slate-900">Formulir Permintaan Penawaran</h3>
+                <p className="text-sm text-slate-500 mt-1">Pesan akan dikirim melalui WhatsApp.</p>
+                <div className="grid sm:grid-cols-2 gap-4 mt-6">
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama</label><input required value={form.nama} onChange={(e) => setForm({...form, nama: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-fire-500" placeholder="Nama Anda" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">Perusahaan</label><input value={form.perusahaan} onChange={(e) => setForm({...form, perusahaan: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-fire-500" placeholder="Opsional" /></div>
+                </div>
+                <div className="mt-4"><label className="block text-sm font-bold text-slate-700 mb-1">Kebutuhan</label>
+                  <select value={form.kebutuhan} onChange={(e) => setForm({...form, kebutuhan: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-fire-500 cursor-pointer">
+                    <option>Pembelian APAR baru</option><option>Isi ulang (refill)</option><option>Inspeksi & perawatan</option><option>Sertifikasi</option><option>Lainnya</option>
+                  </select>
+                </div>
+                <div className="mt-4"><label className="block text-sm font-bold text-slate-700 mb-1">Pesan</label><textarea rows="4" value={form.pesan} onChange={(e) => setForm({...form, pesan: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-fire-500" placeholder="Contoh: 10 unit APAR powder 3 kg untuk kantor 2 lantai"></textarea></div>
+                <button type="submit" className="mt-6 w-full bg-fire-600 hover:bg-fire-700 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2"><IconWhatsApp size={20}/> Kirim via WhatsApp</button>
+              </form>
+            </div>
+          </section>
+
+          {/* FOOTER */}
+          <footer className="bg-ink-900 text-slate-400 border-t border-white/5">
+            <div className="max-w-7xl mx-auto px-4 md:px-6 py-12 grid md:grid-cols-4 gap-8">
+              <div className="md:col-span-2">
+                <div className="flex items-center gap-3">
+                  <img src={LOGO_URL} alt="Logo" className="w-11 h-11 object-contain bg-white rounded-lg p-1" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+                  <div><div className="text-white font-black">PT NURI VIRA PRATAMA</div><div className="text-fire-400 text-[11px] font-bold uppercase tracking-[0.2em]">Viopran Fire Extinguisher</div></div>
+                </div>
+                <p className="text-sm mt-4 max-w-sm">{COMPANY.tagline}. {COMPANY.address}.</p>
+              </div>
+              <div>
+                <div className="text-white font-bold text-sm mb-3">Navigasi</div>
+                <div className="space-y-2 text-sm">{NAV.map(([id, label]) => <button key={id} onClick={() => go(id)} className="block hover:text-white">{label}</button>)}</div>
+              </div>
+              <div>
+                <div className="text-white font-bold text-sm mb-3">Internal</div>
+                <button onClick={onOpenPortal} className="flex items-center gap-2 text-sm hover:text-white"><IconLock size={14}/> Portal Karyawan (Finance & Admin)</button>
+              </div>
+            </div>
+            <div className="border-t border-white/5">
+              <div className="max-w-7xl mx-auto px-4 md:px-6 py-5 text-xs flex flex-col sm:flex-row justify-between gap-2">
+                <span>© {new Date().getFullYear()} PT Nuri Vira Pratama. Hak cipta dilindungi.</span>
+                <span>Viopran Fire Extinguisher</span>
+              </div>
+            </div>
+          </footer>
+
+          {/* FLOATING WHATSAPP */}
+          <a href={waLink('Halo, saya ingin bertanya tentang APAR Viopran.')} target="_blank" rel="noopener" aria-label="WhatsApp" className="fixed bottom-5 right-5 z-40 w-14 h-14 rounded-full bg-[#25D366] text-white flex items-center justify-center shadow-xl hover:scale-105 transition-transform">
+            <IconWhatsApp size={28}/>
+          </a>
+        </div>
+      );
+    }
+
+    // =====================================================================
+    // PORTAL FINANCE & ADMIN (kode akunting asli — logika & struktur data tidak diubah)
+    // =====================================================================
+    function App({ onBackToSite }) {
+      // CRITICAL FIX: ALL HOOKS DECLARED SERIALLY AT TOP LEVEL SCOPE
+      const [isDataLoaded, setIsDataLoaded] = useState(false);
+      const [isSyncing, setIsSyncing] = useState(false);
+
+      // PENGAMAN DATA: auto-save hanya aktif jika data lama berhasil dibaca,
+      // supaya kegagalan koneksi tidak menimpa data di Drive dengan data kosong.
+      const saveAllowedRef = useRef(false);
+      const [loadError, setLoadError] = useState('');
+
+      // MODE HOSTING:
+      //  - isGAS : dibuka dari Google Apps Script (google.script.run) — seperti versi lama
+      //  - isAPI : dibuka dari GitHub Pages, data lewat Web App Apps Script (apps-script/Api.gs)
+      //  - lainnya: mode lokal, data hanya di localStorage browser ini
+      const isGAS = typeof google !== 'undefined' && !!google.script;
+      const isAPI = !isGAS && !!API_URL;
+      const apiCredsRef = useRef(null);
+      const lastSavedRef = useRef(null);
+      const [syncError, setSyncError] = useState('');
+      const [isLoggingIn, setIsLoggingIn] = useState(false);
+      const restoreInputRef = useRef(null);
+      const [restorePreview, setRestorePreview] = useState(null);
+
+      const [isLoggedIn, setIsLoggedIn] = useState(false);
+      const [currentUser, setCurrentUser] = useState(null);
+      const [loginFormState, setLoginFormState] = useState({ username: '', password: '' });
+      const [loginError, setLoginError] = useState('');
+
+      const [printData, setPrintData] = useState(null);
+      const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+      const [activeTab, setActiveTab] = useState('dashboard');
+
+      const [penawaran, setPenawaran] = useState([]);
+      const [invoices, setInvoices] = useState([]);
+      const [expenses, setExpenses] = useState([]);
+      const [suratJalan, setSuratJalan] = useState([]);
+      const [kwitansi, setKwitansi] = useState([]);
+
+      const [editingId, setEditingId] = useState(null);
+      const [deleteConfirm, setDeleteConfirm] = useState(null);
+
+      const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
+      const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+
+      const defaultPnwNotes = "1. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya jika masa berlaku telah habis.\n2. Sistem pembayaran dan termin waktu dapat didiskusikan lebih lanjut.";
+      const emptyPenawaranForm = { date: '', validUntil: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Marketing Dept.', notes: defaultPnwNotes };
+      const emptyInvoiceForm = { date: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Finance Dept.' };
+      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', amount: 0 };
+      const emptySjForm = { date: '', customer: '', driver: '', vehicle: '', items: [], signerName: '', signerRole: 'Warehouse Dept.' };
+      const emptyKwitansiForm = { date: '', receivedFrom: '', amount: 0, purpose: '', signerName: '', signerRole: 'Finance Dept.' };
+
+      const [penawaranForm, setPenawaranForm] = useState(emptyPenawaranForm);
+      const [invoiceForm, setInvoiceForm] = useState(emptyInvoiceForm);
+      const [expenseForm, setExpenseForm] = useState(emptyExpenseForm);
+      const [sjForm, setSjForm] = useState(emptySjForm);
+      const [kwitansiForm, setKwitansiForm] = useState(emptyKwitansiForm);
+
+      const [filterPrintPnw, setFilterPrintPnw] = useState('all');
+      const [filterPrintInv, setFilterPrintInv] = useState('all');
+
+      const [isPenawaranModalOpen, setPenawaranModalOpen] = useState(false);
+      const [isInvoiceModalOpen, setInvoiceModalOpen] = useState(false);
+      const [isExpenseModalOpen, setExpenseModalOpen] = useState(false);
+      const [isSJModalOpen, setSJModalOpen] = useState(false);
+      const [isKwitansiModalOpen, setKwitansiModalOpen] = useState(false);
+
+      const currentYearStr = new Date().getFullYear().toString();
+      const prevYearStr = (new Date().getFullYear() - 1).toString();
+      const [selectedTaxYear, setSelectedTaxYear] = useState(currentYearStr);
+
+      // --- MEMOIZED CALCULATIONS WITH Lap. KONSOLIDASI LABA RUGI TOTAL ---
+      const kasMasukPPN = useMemo(() => (invoices||[]).filter(inv => inv?.usePpn).reduce((sum, inv) => sum + (inv?.total || 0), 0), [invoices]);
+      const kasMasukNonPPN = useMemo(() => (invoices||[]).filter(inv => inv && !inv.usePpn).reduce((sum, inv) => sum + (inv?.total || 0), 0), [invoices]);
+      const totalKasMasuk = kasMasukPPN + kasMasukNonPPN;
+
+      const pendapatanResmiLabaRugi = useMemo(() => (invoices||[]).filter(inv => inv?.usePpn).reduce((sum, inv) => sum + (inv?.subtotal || 0), 0), [invoices]);
+      const pendapatanBebasLabaRugi = useMemo(() => (invoices||[]).filter(inv => !inv?.usePpn).reduce((sum, inv) => sum + (inv?.subtotal || 0), 0), [invoices]);
+      const totalHPP = useMemo(() => (expenses||[]).filter(e => e?.category === 'HPP').reduce((sum, e) => sum + (e?.amount || 0), 0), [expenses]);
+      const totalOperasional = useMemo(() => (expenses||[]).filter(e => e?.category === 'Operasional').reduce((sum, e) => sum + (e?.amount || 0), 0), [expenses]);
+
+      const labaKotorResmi = pendapatanResmiLabaRugi - totalHPP;
+      const labaBersihResmi = labaKotorResmi - totalOperasional;
+
+      // Perhitungan Laba Rugi Keseluruhan (Konsolidasi Total)
+      const totalPendapatanKonsolidasi = pendapatanResmiLabaRugi + pendapatanBebasLabaRugi;
+      const labaKotorKonsolidasi = totalPendapatanKonsolidasi - totalHPP;
+      const labaBersihKonsolidasi = labaKotorKonsolidasi - totalOperasional;
+
+      const availableYears = useMemo(() => {
+        const years = new Set([currentYearStr]);
+        (invoices||[]).forEach(inv => { if(inv?.date) years.add(inv.date.substring(0, 4)) });
+        (expenses||[]).forEach(exp => { if(exp?.date) years.add(exp.date.substring(0, 4)) });
+        return Array.from(years).sort((a, b) => parseInt(b) - parseInt(a));
+      }, [invoices, expenses, currentYearStr]);
+
+      const monthlyRevenueData = useMemo(() => {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+        const data = months.map(m => ({ month: m, curr: 0, prev: 0 }));
+        (invoices||[]).forEach(inv => {
+          if(!inv?.date) return;
+          const date = new Date(inv.date);
+          if (date.getFullYear().toString() === currentYearStr) data[date.getMonth()].curr += (inv.total || 0);
+          else if (date.getFullYear().toString() === prevYearStr) data[date.getMonth()].prev += (inv.total || 0);
+        });
+        return data;
+      }, [invoices]);
+
+      const maxChartValue = Math.max(...monthlyRevenueData.flatMap(d => [d.curr, d.prev]), 10000000);
+
+      const singleYearTaxReport = useMemo(() => {
+        let pendapatan = 0, ppn = 0, hpp = 0, operasional = 0;
+        (invoices||[]).forEach(inv => {
+          if (inv?.usePpn && inv?.date?.substring(0, 4) === selectedTaxYear) {
+            pendapatan += (inv.subtotal || 0); ppn += (inv.ppn || 0);
+          }
+        });
+        (expenses||[]).forEach(exp => {
+          if (exp?.date?.substring(0, 4) === selectedTaxYear) {
+            if (exp.category === 'HPP') hpp += (exp.amount || 0);
+            else if (exp.category === 'Operasional') operasional += (exp.amount || 0);
+          }
+        });
+        const labaBruto = pendapatan - hpp;
+        return { year: selectedTaxYear, pendapatan, ppn, hpp, operasional, labaBruto, GridNeto: labaBruto - operasional };
+      }, [invoices, expenses, selectedTaxYear]);
+
+      const calendarEvents = useMemo(() => {
+        const events = {};
+        (invoices||[]).forEach(inv => {
+          if(!inv?.date) return;
+          if (!events[inv.date]) events[inv.date] = [];
+          events[inv.date].push(inv);
+        });
+        return events;
+      }, [invoices]);
+
+      // --- DATA LOADING & SYNCING (kunci & format data sama persis dengan versi lama) ---
+      const applyLoadedData = (data) => {
+        if (data.penawaran && Array.isArray(data.penawaran)) setPenawaran(data.penawaran);
+        if (data.invoices && Array.isArray(data.invoices)) setInvoices(data.invoices);
+        if (data.expenses && Array.isArray(data.expenses)) setExpenses(data.expenses);
+        if (data.suratJalan && Array.isArray(data.suratJalan)) setSuratJalan(data.suratJalan);
+        if (data.kwitansi && Array.isArray(data.kwitansi)) setKwitansi(data.kwitansi);
+      };
+
+      // --- API (GitHub Pages -> Google Apps Script Web App) ---
+      // Body dikirim sebagai text/plain agar tidak memicu CORS preflight.
+      const callApi = async (payload) => {
+        const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      };
+
+      const saveToServer = (dataObj) => {
+        const json = JSON.stringify(dataObj);
+        setIsSyncing(true);
+        return callApi({ action: 'save', ...apiCredsRef.current, data: dataObj })
+          .then(r => {
+            if (!r || !r.ok) throw new Error((r && r.error) || 'respon tidak valid');
+            lastSavedRef.current = json;
+            setSyncError('');
+            return true;
+          })
+          .catch(err => {
+            setSyncError('Gagal menyimpan ke server (' + err.message + '). Perubahan terakhir belum tersimpan.');
+            return false;
+          })
+          .finally(() => setIsSyncing(false));
+      };
+
+      useEffect(() => {
+        if (typeof google !== 'undefined' && google.script) {
+          google.script.run
+            .withSuccessHandler(function(response) {
+              if (response) {
+                try {
+                  applyLoadedData(JSON.parse(response));
+                  saveAllowedRef.current = true;
+                } catch (e) {
+                  console.error(e);
+                  setLoadError('Data di Google Drive tidak dapat dibaca. Penyimpanan otomatis dinonaktifkan agar data lama tidak tertimpa.');
+                }
+              } else {
+                saveAllowedRef.current = true; // belum ada data sama sekali
+              }
+              setIsDataLoaded(true);
+            })
+            .withFailureHandler(function() {
+              setLoadError('Gagal terhubung ke Google Drive. Penyimpanan otomatis dinonaktifkan agar data lama tidak tertimpa — muat ulang halaman.');
+              setIsDataLoaded(true);
+            })
+            .loadDataFromDrive();
+        } else if (isAPI) {
+          // Data dimuat setelah login — server memeriksa username & password.
+          setIsDataLoaded(true);
+        } else {
+          let localData = null;
+          try { localData = localStorage.getItem('nvp_data_fallback'); } catch (e) {}
+          if (localData) {
+            try {
+              applyLoadedData(JSON.parse(localData));
+              saveAllowedRef.current = true;
+            } catch (e) {
+              setLoadError('Data lokal tidak dapat dibaca. Penyimpanan otomatis dinonaktifkan agar data lama tidak tertimpa.');
+            }
+          } else {
+            saveAllowedRef.current = true;
+          }
+          setIsDataLoaded(true);
+        }
+      }, []);
+
+      useEffect(() => {
+        if (!isDataLoaded || !saveAllowedRef.current) return;
+        const dataToSave = { penawaran, invoices, expenses, suratJalan, kwitansi };
+        if (isAPI && JSON.stringify(dataToSave) === lastSavedRef.current) { setIsSyncing(false); return; } // tidak ada perubahan
+        setIsSyncing(true);
+        const timeoutId = setTimeout(() => {
+          if (isAPI) {
+            saveToServer(dataToSave);
+          } else if (typeof google !== 'undefined' && google.script) {
+            google.script.run
+              .withSuccessHandler(() => setIsSyncing(false))
+              .withFailureHandler(() => setIsSyncing(false))
+              .saveDataToDrive(JSON.stringify(dataToSave));
+          } else {
+             try { localStorage.setItem('nvp_data_fallback', JSON.stringify(dataToSave)); } catch (e) { console.error(e); }
+             setIsSyncing(false);
+          }
+        }, 1500);
+        return () => clearTimeout(timeoutId);
+      }, [penawaran, invoices, expenses, suratJalan, kwitansi, isDataLoaded]);
+
+      const handleDownloadPDF = () => {
+        const element = document.getElementById('print-container');
+        if (!element) return;
+
+        setIsGeneratingPDF(true);
+        const fileName = printData.item && !Array.isArray(printData.item)
+            ? `${printData.item.id.replace(/\//g, '-')}.pdf`
+            : `Dokumen_${printData.type}_Kolektif.pdf`;
+
+        const opt = {
+          margin:       [12, 12, 12, 12],
+          filename:     fileName,
+          image:        { type: 'jpeg', quality: 0.98 },
+          html2canvas:  { scale: 2, useCORS: true, logging: false },
+          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        html2pdf().set(opt).from(element).save().then(() => {
+          setIsGeneratingPDF(false);
+        });
+      };
+
+      useEffect(() => {
+        if (printData && printData.autoDownload) {
+          setTimeout(() => {
+            handleDownloadPDF();
+            setPrintData(prev => ({...prev, autoDownload: false}));
+          }, 800);
+        }
+      }, [printData]);
+
+      useEffect(() => {
+        if (!isSyncing && !syncError) return;
+        const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+        window.addEventListener('beforeunload', warn);
+        return () => window.removeEventListener('beforeunload', warn);
+      }, [isSyncing, syncError]);
+
+      // --- LOGIC FUNCTIONS ---
+      const validUsers = [
+        { username: 'admin', password: 'admin123', name: 'Administrator', initial: 'A' },
+        { username: 'staff', password: 'staff123', name: 'Staff Finance', initial: 'S' }
+      ];
+
+      const loginViaApi = async () => {
+        setIsLoggingIn(true); setLoginError('');
+        const creds = { username: loginFormState.username.trim(), password: loginFormState.password };
+        try {
+          const r = await callApi({ action: 'load', ...creds });
+          if (!r || !r.ok) {
+            setLoginError(r && r.error === 'AUTH' ? 'Username atau password salah!' : 'Server: ' + ((r && r.error) || 'respon tidak valid'));
+            return;
+          }
+          let data = {};
+          if (r.data) {
+            try { data = typeof r.data === 'string' ? JSON.parse(r.data) : r.data; }
+            catch (e) { setLoginError('Data di Google Drive tidak dapat dibaca. Hubungi admin.'); return; }
+          }
+          const arr = (x) => Array.isArray(x) ? x : [];
+          lastSavedRef.current = JSON.stringify({ penawaran: arr(data.penawaran), invoices: arr(data.invoices), expenses: arr(data.expenses), suratJalan: arr(data.suratJalan), kwitansi: arr(data.kwitansi) });
+          applyLoadedData(data);
+          apiCredsRef.current = creds;
+          saveAllowedRef.current = true;
+          setLoadError(''); setSyncError('');
+          const u = r.user || {};
+          setCurrentUser({ username: u.username || creds.username, name: u.name || creds.username, initial: u.initial || (creds.username[0] || '?').toUpperCase() });
+          setIsLoggedIn(true);
+        } catch (err) {
+          setLoginError('Tidak dapat terhubung ke server data. Periksa koneksi internet dan API_URL di config.js.');
+        } finally {
+          setIsLoggingIn(false);
+        }
+      };
+
+      const handleLogin = (e) => {
+        e.preventDefault();
+        if (isAPI) { loginViaApi(); return; }
+        const user = validUsers.find(
+          u => u.username === loginFormState.username && u.password === loginFormState.password
+        );
+        if (user) { setIsLoggedIn(true); setCurrentUser(user); setLoginError(''); }
+        else { setLoginError('Username atau password salah!'); }
+      };
+
+      const handleLogout = async () => {
+        if (isAPI && apiCredsRef.current) {
+          // Simpan dulu perubahan yang belum terkirim, baru kosongkan data dari memori browser.
+          const pending = { penawaran, invoices, expenses, suratJalan, kwitansi };
+          if (saveAllowedRef.current && JSON.stringify(pending) !== lastSavedRef.current) {
+            const ok = await saveToServer(pending);
+            if (!ok) return; // tetap login agar data tidak hilang
+          }
+          saveAllowedRef.current = false;
+          apiCredsRef.current = null;
+          lastSavedRef.current = null;
+          setPenawaran([]); setInvoices([]); setExpenses([]); setSuratJalan([]); setKwitansi([]);
+          setActiveTab('dashboard');
+        }
+        setIsLoggedIn(false); setCurrentUser(null); setLoginFormState({ username: '', password: '' });
+      };
+
+      const executeDelete = () => {
+        if (!deleteConfirm) return;
+        const { type, id } = deleteConfirm;
+        if (type === 'penawaran') setPenawaran(renumberDocuments((penawaran||[]).filter(i => i?.id !== id), 'PNW', true));
+        else if (type === 'invoice') setInvoices(renumberDocuments((invoices||[]).filter(i => i?.id !== id), 'INV', true));
+        else if (type === 'sj') setSuratJalan(renumberDocuments((suratJalan||[]).filter(i => i?.id !== id), 'SJ', false));
+        else if (type === 'kwitansi') setKwitansi(renumberDocuments((kwitansi||[]).filter(i => i?.id !== id), 'KWT', false));
+        else if (type === 'expense') setExpenses((expenses||[]).filter(i => i?.id !== id));
+        setDeleteConfirm(null);
+      };
+
+      const handleEdit = (type, item) => {
+        setEditingId(item.id);
+        if (type === 'penawaran') { setPenawaranForm({...emptyPenawaranForm, ...item, items: item.items||[]}); setPenawaranModalOpen(true); }
+        else if (type === 'invoice') { setInvoiceForm({...emptyInvoiceForm, ...item, items: item.items||[]}); setInvoiceModalOpen(true); }
+        else if (type === 'sj') { setSjForm({...emptySjForm, ...item, items: item.items||[]}); setSJModalOpen(true); }
+        else if (type === 'kwitansi') { setKwitansiForm({...emptyKwitansiForm, ...item}); setKwitansiModalOpen(true); }
+        else if (type === 'expense') { setExpenseForm({...emptyExpenseForm, ...item}); setExpenseModalOpen(true); }
+      };
+
+      const openNewModal = (type) => {
+        setEditingId(null);
+        if (type === 'penawaran') { setPenawaranForm(emptyPenawaranForm); setPenawaranModalOpen(true); }
+        else if (type === 'invoice') { setInvoiceForm(emptyInvoiceForm); setInvoiceModalOpen(true); }
+        else if (type === 'sj') { setSjForm(emptySjForm); setSJModalOpen(true); }
+        else if (type === 'kwitansi') { setKwitansiForm(emptyKwitansiForm); setKwitansiModalOpen(true); }
+        else if (type === 'expense') { setExpenseForm(emptyExpenseForm); setExpenseModalOpen(true); }
+      };
+
+      const handleSavePenawaran = () => {
+        const subtotal = (penawaranForm.items||[]).reduce((sum, item) => sum + ((item?.qty||0) * (item?.price||0)), 0);
+        const ppn = penawaranForm.usePpn ? subtotal * 0.11 : 0;
+        const total = subtotal + ppn;
+        const completeItem = { ...penawaranForm, subtotal, ppn, total };
+        let newArray = editingId ? (penawaran||[]).map(p => p?.id === editingId ? { ...completeItem, id: p.id } : p) : [...(penawaran||[]), { ...completeItem, id: 'temp' }];
+        setPenawaran(renumberDocuments(newArray, 'PNW', true));
+        setPenawaranModalOpen(false);
+      };
+
+      const handleSaveInvoice = () => {
+        const subtotal = (invoiceForm.items||[]).reduce((sum, item) => sum + ((item?.qty||0) * (item?.price||0)), 0);
+        const ppn = invoiceForm.usePpn ? subtotal * 0.11 : 0;
+        const total = subtotal + ppn;
+        const completeItem = { ...invoiceForm, subtotal, ppn, total };
+        let newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? { ...completeItem, id: i.id } : i) : [...(invoices||[]), { ...completeItem, id: 'temp' }];
+        setInvoices(renumberDocuments(newArray, 'INV', true));
+        setInvoiceModalOpen(false);
+      };
+
+      const handleSaveSJ = () => {
+        let newArray = editingId ? (suratJalan||[]).map(s => s?.id === editingId ? { ...sjForm, id: s.id } : s) : [...(suratJalan||[]), { ...sjForm, id: 'temp' }];
+        setSuratJalan(renumberDocuments(newArray, 'SJ', false));
+        setSJModalOpen(false);
+      };
+
+      const handleSaveKwitansi = () => {
+        const completeItem = { ...kwitansiForm, amount: Number(kwitansiForm.amount) || 0 };
+        let newArray = editingId ? (kwitansi||[]).map(k => k?.id === editingId ? { ...completeItem, id: k.id } : k) : [...(kwitansi||[]), { ...completeItem, id: 'temp' }];
+        setKwitansi(renumberDocuments(newArray, 'KWT', false));
+        setKwitansiModalOpen(false);
+      };
+
+      const handleSaveExpense = () => {
+        const completeItem = { ...expenseForm, amount: Number(expenseForm.amount) || 0 };
+        if (editingId) { setExpenses((expenses||[]).map(e => e?.id === editingId ? { ...completeItem, id: e.id } : e)); }
+        else {
+          const newId = `EXP-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+          setExpenses([{ ...completeItem, id: newId }, ...(expenses||[])].sort((a,b) => new Date(b?.date||0) - new Date(a?.date||0)));
+        }
+        setExpenseModalOpen(false);
+      };
+
+      const handlePrintAllPenawaran = (downloadPdf = false) => {
+        let filtered = penawaran || [];
+        if (filterPrintPnw === 'ppn') filtered = filtered.filter(p => p?.usePpn);
+        if (filterPrintPnw === 'non_ppn') filtered = filtered.filter(p => p && !p.usePpn);
+        setPrintData({ type: 'penawaran', item: filtered, autoDownload: downloadPdf });
+      };
+
+      const handlePrintAllInvoice = (downloadPdf = false) => {
+        let filtered = invoices || [];
+        if (filterPrintInv === 'ppn') filtered = filtered.filter(i => i?.usePpn);
+        if (filterPrintInv === 'non_ppn') filtered = filtered.filter(i => i && !i.usePpn);
+        setPrintData({ type: 'invoice', item: filtered, autoDownload: downloadPdf });
+      };
+
+      // --- BACKUP & PULIHKAN DATA (file JSON) ---
+      const handleBackup = (label) => {
+        const data = { penawaran, invoices, expenses, suratJalan, kwitansi };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `nvp-backup-${new Date().toISOString().slice(0, 10)}${typeof label === 'string' ? '-' + label : ''}.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      };
+
+      const handleRestoreFile = (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const d = JSON.parse(reader.result);
+            const keys = ['penawaran', 'invoices', 'expenses', 'suratJalan', 'kwitansi'];
+            if (!d || !keys.some(k => Array.isArray(d[k]))) throw new Error('format');
+            setRestorePreview({ fileName: file.name, data: d });
+          } catch (err) {
+            setSyncError('File tidak valid. Pilih file backup JSON dari portal ini (berisi penawaran, invoices, expenses, suratJalan, kwitansi).');
+          }
+        };
+        reader.readAsText(file);
+      };
+
+      const applyRestore = () => {
+        if (!restorePreview) return;
+        const d = restorePreview.data;
+        const arr = (x) => Array.isArray(x) ? x : [];
+        handleBackup('sebelum-pulihkan'); // cadangan otomatis data saat ini
+        setPenawaran(arr(d.penawaran)); setInvoices(arr(d.invoices)); setExpenses(arr(d.expenses));
+        setSuratJalan(arr(d.suratJalan)); setKwitansi(arr(d.kwitansi));
+        saveAllowedRef.current = true;
+        setLoadError('');
+        setRestorePreview(null);
+      };
+
+      // --- EARLY RETURNS (Tampilan Layar Tunggal) ---
+      if (!isDataLoaded) {
+        return (
+          <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4 font-sans text-slate-800">
+             <div className="w-12 h-12 border-4 border-t-red-600 border-slate-200 rounded-full animate-spin mb-5"></div>
+             <h2 className="text-xl font-bold tracking-tight">Terhubung ke Google Drive...</h2>
+             <p className="text-sm text-slate-500 mt-2 font-medium">Sinkronisasi data sistem keuangan PT Nuri Vira Pratama.</p>
+          </div>
+        );
+      }
+
+      if (!isLoggedIn) {
+        return (
+          <div className="min-h-screen hero-bg relative flex items-center justify-center p-4 font-sans">
+            <div className="absolute inset-0 grid-lines pointer-events-none"></div>
+            <button onClick={onBackToSite} className="absolute top-5 left-5 flex items-center gap-2 text-slate-300 hover:text-white text-sm font-bold bg-white/5 border border-white/10 px-4 py-2 rounded-xl">
+              <IconChevronLeft size={16}/> Kembali ke Website
+            </button>
+            <div className="relative bg-white p-8 sm:p-10 rounded-3xl shadow-2xl w-full max-w-md border border-slate-100">
+              <div className="text-center mb-8">
+                <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-sm border border-slate-100">
+                  <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+                </div>
+                <h1 className="text-2xl font-black text-slate-800 tracking-tight leading-tight">PT NURI VIRA PRATAMA</h1>
+                <p className="text-red-600 font-bold text-[10px] tracking-[0.25em] uppercase mt-2">Finance & Admin Portal</p>
+              </div>
+              {loginError && (
+                <div className="bg-rose-50 text-rose-600 px-4 py-3 rounded-xl text-sm mb-6 border border-rose-100 flex items-center justify-center font-medium">
+                  {loginError}
+                </div>
+              )}
+              <form onSubmit={handleLogin} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Username</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400"><IconUser size={18} /></div>
+                    <input type="text" required value={loginFormState.username} onChange={(e) => setLoginFormState({...loginFormState, username: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-red-500 outline-none" placeholder="Masukkan username" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Password</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400"><IconLock size={18} /></div>
+                    <input type="password" required value={loginFormState.password} onChange={(e) => setLoginFormState({...loginFormState, password: e.target.value})} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-red-500 outline-none" placeholder="••••••••" />
+                  </div>
+                </div>
+                <button type="submit" disabled={isLoggingIn} className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl hover:bg-red-700 disabled:opacity-60 disabled:cursor-wait transition-all duration-200 mt-6">{isLoggingIn ? 'Memeriksa akun...' : 'Masuk ke Portal'}</button>
+              </form>
+              {isAPI ? (
+                <div className="mt-8 pt-6 border-t border-slate-100 text-xs text-slate-500 text-center font-medium flex items-center justify-center gap-2">
+                  <IconLock size={14}/> Terhubung ke server data perusahaan (Google Drive)
+                </div>
+              ) : (
+                <div className="mt-8 pt-6 border-t border-slate-100 text-xs text-slate-500 text-center font-medium">
+                  {!isGAS && (
+                    <div className="mb-4 text-left bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 leading-relaxed">
+                      <b>Mode lokal:</b> data hanya tersimpan di browser ini. Isi <code className="bg-amber-100 px-1 rounded">API_URL</code> di <code className="bg-amber-100 px-1 rounded">config.js</code> untuk memakai data Google Drive.
+                    </div>
+                  )}
+                  <p>Akun Demo Tersedia:</p>
+                  <div className="flex justify-center gap-3 mt-3">
+                    <span className="bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">admin / admin123</span>
+                    <span className="bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">staff / staff123</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // === TAMPILAN KHUSUS CETAK & PDF ===
+      if (printData) {
+        const { type, item } = printData;
+        if (type === 'tax_report') {
+          return (
+            <div className="min-h-screen bg-slate-200 py-8 font-sans relative">
+              {isGeneratingPDF && (
+                <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center text-white">
+                  <div className="w-12 h-12 border-4 border-t-blue-500 border-white rounded-full animate-spin mb-5"></div>
+                  <h2 className="text-2xl font-bold">Menyiapkan Dokumen PDF...</h2>
+                </div>
+              )}
+              <div className="max-w-4xl mx-auto mb-6 flex justify-between items-center no-print px-4 md:px-0">
+                <button onClick={() => setPrintData(null)} className="px-5 py-2.5 bg-slate-700 text-white font-semibold rounded-xl flex items-center gap-2"><IconX size={18} /> Tutup</button>
+                <div className="flex gap-3">
+                  <button onClick={handleDownloadPDF} className="px-6 py-2.5 bg-rose-600 text-white font-bold rounded-xl flex items-center gap-2 shadow-md"><IconDownload size={18} /> Unduh PDF</button>
+                  <button onClick={() => window.print()} className="px-6 py-2.5 bg-blue-700 text-white font-bold rounded-xl flex items-center gap-2 shadow-md"><IconPrinter size={18} /> Cetak</button>
+                </div>
+              </div>
+
+              <div id="print-container" className="bg-white print-area">
+                <div className="max-w-4xl mx-auto p-4 text-slate-800 bg-white">
+                  <div className="flex justify-between items-center border-b-[3px] border-slate-900 pb-3 mb-4">
+                    <div className="w-[65%] flex items-center gap-4">
+                      <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain shrink-0" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+                      <div>
+                        <h1 className="text-xl font-black text-slate-900 leading-tight">PT NURI VIRA PRATAMA</h1>
+                        <p className="text-[10px] text-slate-800 font-bold uppercase tracking-wider mt-0.5">Suplier Peralatan Proteksi Kebakaran dan Sertifikasi</p>
+                        <p className="text-[9px] text-slate-600 font-medium mt-1">Jln. Raya Penggilingan, Komp. Pasar Lama Komarudin, Kec. Cakung , Jakarta Timur</p>
+                        <p className="text-[9px] text-slate-600 font-medium">Telp : 0856-7725-758 | Email : ptnurivirapratama@gmail.com</p>
+                      </div>
+                    </div>
+                    <div className="w-[35%] text-right"><h2 className="text-lg font-black text-slate-300">LAPORAN SPT</h2></div>
+                  </div>
+                  <div className="mb-4 text-center">
+                    <h3 className="font-black text-base text-slate-900">LAMPIRAN I - PENGHITUNGAN PENGHASILAN NETO KOMERSIAL</h3>
+                    <p className="text-[11px] font-bold text-blue-800 mt-0.5">TAHUN PAJAK: {item.year}</p>
+                  </div>
+                  <table className="w-full text-left mb-4 border-collapse text-[11px]">
+                    <thead className="border-y-2 border-slate-900 bg-slate-50">
+                      <tr><th className="py-1.5 px-2 font-bold w-10 text-center">No.</th><th className="py-1.5 px-2 font-bold">Elemen Keuangan</th><th className="py-1.5 px-2 font-bold text-right w-48">Nominal Rupiah (Rp)</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      <tr className="avoid-break"><td className="py-2 px-2 text-center">1</td><td className="py-2 px-2 font-medium">Peredaran Usaha (Pendapatan Resmi)</td><td className="py-2 px-2 text-right font-bold text-slate-800">{formatIDR(item.pendapatan)}</td></tr>
+                      <tr className="avoid-break"><td className="py-2 px-2 text-center">2</td><td className="py-2 px-2 font-medium">Harga Pokok Penjualan (HPP)</td><td className="py-2 px-2 text-right text-rose-600 font-bold">({formatIDR(item.hpp)})</td></tr>
+                      <tr className="bg-slate-50 font-bold border-y-2 avoid-break"><td className="py-2 px-2 text-center">3</td><td className="py-2 px-2">Laba Bruto (1 - 2)</td><td className="py-2 px-2 text-right text-blue-700">{formatIDR(item.labaBruto)}</td></tr>
+                      <tr className="avoid-break"><td className="py-2 px-2 text-center">4</td><td className="py-2 px-2 font-medium">Biaya Usaha Lainnya (Operasional)</td><td className="py-2 px-2 text-right text-rose-600 font-bold">({formatIDR(item.operasional)})</td></tr>
+                      <tr className="border-y-2 border-slate-900 bg-emerald-50/50 font-bold avoid-break"><td className="py-3 px-2 text-center">5</td><td className="py-3 px-2">Penghasilan Neto Komersial (3 - 4)</td><td className={`py-3 px-2 text-right text-sm ${item.GridNeto >= 0 ? 'text-emerald-700':'text-rose-700'}`}>{formatIDR(item.GridNeto)}</td></tr>
+                    </tbody>
+                  </table>
+                  <div className="text-[10px] text-slate-600 bg-slate-50 p-3 rounded-lg border avoid-break">
+                    <p className="font-bold text-slate-800 mb-1">Informasi Tambahan:</p>
+                    <p className="font-semibold">Total PPN Keluaran (11%) Terpungut: <span className="text-slate-900 font-bold text-xs ml-1">{formatIDR(item.ppn)}</span></p>
+                  </div>
+                  <div className="mt-8 flex justify-end avoid-break"><div className="text-center w-40 border-b border-slate-400 pb-1 text-[11px] font-bold text-slate-800 uppercase tracking-wider">Direktur Keuangan</div></div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        const docsToPrint = Array.isArray(item) ? item : [item];
+        if (docsToPrint.length === 0) {
+           return (
+            <div className="min-h-screen bg-slate-100 py-8 font-sans flex flex-col items-center justify-center">
+              <div className="bg-white p-10 rounded-2xl shadow-xl text-center max-w-md border border-slate-100">
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-5"><IconFilter size={36} className="text-slate-400" /></div>
+                <h3 className="text-xl font-bold text-slate-800 tracking-tight">Data Tidak Ditemukan</h3>
+                <button onClick={() => setPrintData(null)} className="mt-6 px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl w-full">Kembali</button>
+              </div>
+            </div>
+           )
+        }
+
+        return (
+          <div className="min-h-screen bg-slate-200 py-8 font-sans relative">
+            {isGeneratingPDF && (
+              <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center text-white">
+                <div className="w-12 h-12 border-4 border-t-blue-500 border-white rounded-full animate-spin mb-5"></div>
+                <h2 className="text-2xl font-bold">Menyiapkan Dokumen PDF...</h2>
+              </div>
+            )}
+            <div className="max-w-4xl mx-auto mb-6 flex justify-between items-center no-print px-4 md:px-0">
+              <button onClick={() => setPrintData(null)} className="px-5 py-2.5 bg-slate-700 text-white font-semibold rounded-xl flex items-center gap-2"><IconX size={18} /> Kembali</button>
+              <div className="flex gap-3">
+                 <button onClick={handleDownloadPDF} className="px-6 py-2.5 bg-rose-600 text-white font-bold rounded-xl flex items-center gap-2 shadow-md"><IconDownload size={18} /> Download PDF ({docsToPrint.length})</button>
+                 <button onClick={() => window.print()} className="px-6 py-2.5 bg-blue-700 text-white font-bold rounded-xl flex items-center gap-2 shadow-md"><IconPrinter size={18} /> Cetak Dokumen</button>
+              </div>
+            </div>
+
+            <div id="print-container" className="bg-transparent print-text-base">
+              {docsToPrint.map((doc, index) => (
+                <div key={doc?.id || index} className="print-page-break max-w-4xl mx-auto bg-white p-2 print-area text-slate-800 mb-6">
+                  <div className="flex justify-between items-start border-b-[3px] border-slate-900 pb-3 mb-4">
+                    <div className="w-[65%] flex items-center gap-4">
+                      <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain shrink-0" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+                      <div>
+                        <h1 className="text-xl font-black text-slate-900 leading-tight">PT NURI VIRA PRATAMA</h1>
+                        <p className="text-[10px] text-slate-800 font-bold uppercase tracking-wider mt-0.5">Suplier Peralatan Proteksi Kebakaran dan Sertifikasi</p>
+                        <p className="text-[9px] text-slate-600 font-medium mt-1">Jln. Raya Penggilingan, Komp. Pasar Lama Komarudin, Kec. Cakung , Jakarta Timur</p>
+                        <p className="text-[9px] text-slate-600 font-medium">Telp : 0856-7725-758 | Email : ptnurivirapratama@gmail.com</p>
+                      </div>
+                    </div>
+                    <div className="w-[35%] text-right">
+                      <h2 className="text-2xl font-black text-slate-200 tracking-wider">
+                        {type==='penawaran'&&'PENAWARAN'}{type==='invoice'&&'INVOICE'}{type==='sj'&&'SURAT JALAN'}{type==='kwitansi'&&'KWITANSI'}
+                      </h2>
+                      <p className="text-sm font-bold text-slate-800 mt-1">{doc?.id}</p>
+                    </div>
+                  </div>
+
+                  {(type === 'penawaran' || type === 'invoice') && (
+                    <div className="text-[11px]">
+                      <div className="flex justify-between mb-4 font-semibold">
+                        <div className="w-1/2">
+                          <p className="text-slate-500 uppercase text-[9px] tracking-wider mb-0.5">{type==='penawaran'?'Kepada Yth:':'Ditagihkan Kepada:'}</p>
+                          <p className="font-bold text-[13px] text-slate-900">{doc?.customer}</p>
+                        </div>
+                        <div className="w-1/2 text-right">
+                          <p><span className="text-slate-400 uppercase text-[9px] mr-2">Tanggal:</span>{doc?.date}</p>
+                          {type==='penawaran' && <p><span className="text-slate-400 uppercase text-[9px] mr-2">Berlaku s/d:</span>{doc?.validUntil}</p>}
+                          <p><span className="text-slate-400 uppercase text-[9px] mr-2">Pajak:</span>{doc?.usePpn ? 'Termasuk PPN 11%' : 'Non-PPN'}</p>
+                        </div>
+                      </div>
+
+                      {type === 'penawaran' && <p className="text-[11px] text-slate-800 mb-3 font-medium">Dengan hormat, bersama surat ini kami ajukan penawaran harga sebagai berikut:</p>}
+
+                      <table className="w-full text-left mb-4 border-collapse text-[11px]">
+                        <thead className="bg-slate-50 border-y-2 border-slate-800">
+                          <tr><th className="py-1.5 px-2 font-bold">Deskripsi Barang / Jasa</th><th className="py-1.5 px-2 font-bold text-center w-16">Qty</th><th className="py-1.5 px-2 font-bold text-right w-28">Harga Satuan</th><th className="py-1.5 px-2 font-bold text-right w-32">Total</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {(doc?.items||[]).map((it, idx) => (
+                            <tr key={idx} className="avoid-break"><td className="py-2 px-2 font-semibold text-slate-800">{it?.desc}</td><td className="py-2 px-2 text-center text-slate-600 font-bold">{it?.qty}</td><td className="py-2 px-2 text-right text-slate-700">{formatIDR(it?.price)}</td><td className="py-2 px-2 text-right font-bold text-slate-900">{formatIDR((it?.qty||0) * (it?.price||0))}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      <div className="flex justify-end mb-4 avoid-break">
+                        <div className="w-64 space-y-1 bg-slate-50 p-3 rounded-lg border text-[11px]">
+                          <div className="flex justify-between font-semibold"><span className="text-slate-500">Subtotal (DPP)</span><span>{formatIDR(doc?.subtotal)}</span></div>
+                          {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">PPN (11%)</span><span>{formatIDR(doc?.ppn)}</span></div>}
+                          <div className="flex justify-between font-black border-t pt-1.5 mt-1.5 text-[13px] text-blue-700"><span>Total Akhir</span><span>{formatIDR(doc?.total)}</span></div>
+                        </div>
+                      </div>
+
+                      {type === 'invoice' && !doc?.usePpn && (
+                        <div className="mb-4 text-[10px] text-slate-800 font-medium bg-blue-50/50 p-3 rounded-lg border border-blue-100 inline-block avoid-break">
+                          <p className="font-bold text-slate-800 mb-0.5">Keterangan Transfer:</p>
+                          <p>Bank: <b>BCA</b> | Norek: <b className="text-blue-700 text-[11px]">0941426696</b> | A/n: <b>Adrian Anugerah Putra</b></p>
+                        </div>
+                      )}
+                      {type === 'invoice' && doc?.usePpn && (
+                        <div className="mb-4 text-[10px] text-slate-800 font-medium bg-indigo-50/50 p-3 rounded-lg border border-indigo-100 inline-block avoid-break">
+                          <p className="font-bold text-slate-800 mb-0.5">Keterangan Transfer:</p>
+                          <p>Bank: <b>DKI</b> | Norek: <b className="text-indigo-700 text-[11px]">50308011105</b> | A/n: <b>PT Nuri Vira Pratama</b></p>
+                        </div>
+                      )}
+                      {type === 'penawaran' && (
+                        <div className="text-[10px] text-slate-600 mb-4 bg-blue-50/50 p-3 rounded-md border border-blue-100 avoid-break">
+                          <p className="font-bold text-slate-800 uppercase mb-0.5">Catatan Penawaran:</p>
+                          <div className="whitespace-pre-wrap pl-1 leading-tight">{doc?.notes}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {type === 'sj' && (
+                    <div className="text-[11px]">
+                      <div className="flex justify-between mb-4">
+                        <div><p className="text-slate-500 uppercase text-[9px] mb-0.5">Tujuan Pengiriman:</p><p className="font-bold text-[13px] text-slate-900">{doc?.customer}</p></div>
+                        <div className="text-right"><p className="text-slate-500 uppercase text-[9px] mb-0.5">Tanggal:</p><p className="font-bold text-[13px] text-slate-900">{doc?.date}</p></div>
+                      </div>
+                      <div className="mb-4 p-3 bg-slate-50 rounded-lg border flex gap-10 avoid-break">
+                        <div><span className="text-slate-500 text-[9px] block mb-0.5 uppercase font-bold">Pengemudi</span><span className="font-bold text-[12px]">{doc?.driver}</span></div>
+                        <div><span className="text-slate-500 text-[9px] block mb-0.5 uppercase font-bold">Plat Kendaraan</span><span className="font-bold text-[12px] bg-white px-2 py-0.5 rounded border">{doc?.vehicle}</span></div>
+                      </div>
+                      <table className="w-full text-left mb-4 border-collapse">
+                        <thead className="bg-slate-50 border-y-2 border-slate-800">
+                          <tr><th className="py-1.5 px-2 w-12 text-center">No</th><th className="py-1.5 px-2">Daftar Barang Muatan</th><th className="py-1.5 px-2 text-center w-24">Kuantitas</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {(doc?.items||[]).map((it, idx) => (
+                            <tr key={idx} className="avoid-break"><td className="py-2 px-2 text-center text-slate-400 font-bold">{idx + 1}</td><td className="py-2 px-2 font-bold text-slate-800">{it?.desc}</td><td className="py-2 px-2 text-center font-black text-sm bg-slate-50/50">{it?.qty}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {type === 'kwitansi' && (
+                    <div className="space-y-4 text-[11px]">
+                      <div className="bg-slate-50 p-4 rounded-xl border flex justify-between items-center avoid-break">
+                        <div><div className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Telah Terima Dari</div><div className="text-lg font-black text-slate-900">{doc?.receivedFrom}</div></div>
+                        <div className="text-right"><div className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Tanggal</div><div className="font-bold text-[13px]">{doc?.date}</div></div>
+                      </div>
+                      <div className="p-4 border rounded-xl space-y-3 avoid-break">
+                        <div><div className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Untuk Pembayaran</div><div className="font-semibold text-slate-800 text-[13px] leading-relaxed">{doc?.purpose}</div></div>
+                        <div><div className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Sejumlah Uang</div><div className="font-black text-lg bg-amber-50 border border-amber-200 text-amber-700 px-4 py-1.5 rounded-lg inline-block">{formatIDR(doc?.amount)}</div></div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-8 flex justify-between text-[11px] avoid-break">
+                    {type === 'sj' ? (
+                      <>
+                        <div className="text-center w-40"><p className="mb-10 text-slate-500">Penerima Barang,</p><div className="h-0.5 bg-slate-800 w-full mt-2"></div></div>
+                        <div className="text-center w-40"><p className="mb-10 text-slate-500">Pengemudi / Kurir,</p><p className="font-bold border-b border-slate-800 pb-0.5">{doc?.driver}</p></div>
+                      </>
+                    ) : null}
+                    <div className="text-center w-40 ml-auto">
+                      <p className="mb-10 text-slate-500">{type==='kwitansi'?'Penerima Pembayaran,':'Hormat Kami,'}</p>
+                      <p className="font-bold border-b border-slate-800 pb-0.5">{doc?.signerName || '__________________'}</p>
+                      <p className="text-[9px] text-slate-500 font-bold mt-1 uppercase tracking-wider">{doc?.signerRole}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      // --- 3. MAIN RENDER TAB SCREENS ---
+      const renderDashboard = () => (
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
+              <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-5 text-blue-600 group-hover:scale-110 transition-transform duration-500"><IconWallet size={120} /></div>
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 relative z-10">
+                <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">Total Kas Masuk</h3>
+                <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center"><IconWallet size={20} /></div>
+              </div>
+              <div className="mt-5 text-3xl font-extrabold text-slate-800 relative z-10">{formatIDR(totalKasMasuk)}</div>
+              <p className="text-xs font-medium text-slate-400 mt-2 relative z-10">Omzet Kotor (PPN & Non-PPN)</p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
+              <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-5 text-rose-600 group-hover:scale-110 transition-transform duration-500"><IconTrendingDown size={120} /></div>
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 relative z-10">
+                <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">Arus Kas Keluar</h3>
+                <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center"><IconTrendingDown size={20} /></div>
+              </div>
+              <div className="mt-5 text-3xl font-extrabold text-slate-800 relative z-10">{formatIDR(totalHPP + totalOperasional)}</div>
+              <p className="text-xs font-medium text-slate-400 mt-2 relative z-10">HPP & Biaya Operasional</p>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
+              <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-5 text-emerald-600 group-hover:scale-110 transition-transform duration-500"><IconCalculator size={120} /></div>
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 relative z-10">
+                <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">Laba Bersih Konsolidasi</h3>
+                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center"><IconCalculator size={20} /></div>
+              </div>
+              <div className={`mt-5 text-3xl font-extrabold relative z-10 ${labaBersihKonsolidasi >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {formatIDR(labaBersihKonsolidasi)}
+              </div>
+              <p className="text-xs font-medium text-slate-400 mt-2 relative z-10">Total Omzet Bersih Usaha (Seluruh Invoice)</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <IconBarChart2 size={20} className="text-blue-600" /> Analisis Pendapatan Penjualan
+                </h2>
+                <p className="text-sm text-slate-500 mt-1 font-medium">Tren kas masuk kotor (YTD) vs Tahun Lalu.</p>
+              </div>
+              <div className="flex gap-4 text-xs font-bold uppercase tracking-wider bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
+                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-600"></div> {currentYearStr}</div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-slate-300"></div> {prevYearStr}</div>
+              </div>
+            </div>
+
+            <div className="h-72 flex items-end gap-2 sm:gap-4 border-b border-slate-200 pb-2 relative w-full overflow-x-auto min-w-[500px]">
+              <div className="absolute top-0 left-0 w-full h-px bg-slate-100"></div>
+              <div className="absolute top-1/4 left-0 w-full h-px bg-slate-100"></div>
+              <div className="absolute top-2/4 left-0 w-full h-px bg-slate-100"></div>
+              <div className="absolute top-3/4 left-0 w-full h-px bg-slate-100"></div>
+
+              {monthlyRevenueData.map((data, idx) => (
+                <div key={idx} className="flex-1 flex flex-col items-center justify-end h-full relative z-10 group cursor-pointer">
+                  <div className="opacity-0 group-hover:opacity-100 absolute -top-14 bg-slate-800 text-white text-xs py-2 px-3 rounded-lg shadow-xl whitespace-nowrap transition-opacity pointer-events-none z-20 font-medium">
+                    <div className="font-bold text-slate-300 mb-1 border-b border-slate-600 pb-1">{data.month}</div>
+                    <div className="flex justify-between gap-4"><span className="text-blue-300">{currentYearStr}</span> <span>{formatIDR(data.curr)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-400">{prevYearStr}</span> <span>{formatIDR(data.prev)}</span></div>
+                  </div>
+                  <div className="flex items-end justify-center w-full gap-1 sm:gap-2 h-full pb-1">
+                    <div className="w-1/2 max-w-[24px] bg-slate-200 rounded-t-sm transition-all duration-700" style={{ height: `${(data.prev / maxChartValue) * 100}%`, minHeight: data.prev > 0 ? '4px' : '0' }}></div>
+                    <div className="w-1/2 max-w-[24px] bg-blue-600 rounded-t-sm transition-all duration-700 shadow-sm" style={{ height: `${(data.curr / maxChartValue) * 100}%`, minHeight: data.curr > 0 ? '4px' : '0' }}></div>
+                  </div>
+                  <span className="text-xs font-bold text-slate-400 mt-3">{data.month}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            {/* LAPORAN LABA RUGI TOTAL KONSOLIDASI */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-6 py-5 border-b border-slate-100 bg-white">
+                <h2 className="text-lg font-bold text-slate-800">Laporan Laba Rugi Keseluruhan (Konsolidasi)</h2>
+                <p className="text-sm text-slate-500 mt-1 font-medium">Penggabungan seluruh peredaran usaha Kena Pajak & Beban Pajak</p>
+              </div>
+              <div className="p-6 overflow-x-auto flex-1 bg-slate-50/30">
+                <table className="w-full text-left border-collapse min-w-[400px]">
+                  <tbody>
+                    <tr><td className="py-2.5 font-bold text-slate-800 text-xs tracking-wider uppercase" colSpan="2">Pendapatan Bersih Usaha</td></tr>
+                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Peredaran Usaha Resmi (DPP PPN)</td><td className="py-2.5 text-right text-slate-800 font-semibold">{formatIDR(pendapatanResmiLabaRugi)}</td></tr>
+                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Peredaran Usaha Bebas (Non-PPN)</td><td className="py-2.5 text-right text-slate-800 font-semibold">{formatIDR(pendapatanBebasLabaRugi)}</td></tr>
+                    <tr className="border-t border-slate-200"><td className="py-3 font-bold text-slate-800">Total Omzet Bersih Usaha</td><td className="py-3 text-right font-bold text-slate-800">{formatIDR(totalPendapatanKonsolidasi)}</td></tr>
+
+                    <tr><td className="py-4 font-bold text-slate-800 text-xs tracking-wider uppercase" colSpan="2">Harga Pokok Penjualan (HPP)</td></tr>
+                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Beban Pokok Proyek / Penjualan</td><td className="py-2.5 text-right text-rose-600 font-medium">({formatIDR(totalHPP)})</td></tr>
+                    <tr className="border-t border-slate-200 bg-white"><td className="py-3.5 px-4 rounded-l-lg font-bold text-slate-800">TOTAL LABA BRUTO KONSOLIDASI</td><td className="py-3.5 px-4 rounded-r-lg text-right font-bold text-blue-700">{formatIDR(labaKotorKonsolidasi)}</td></tr>
+
+                    <tr><td className="py-4 font-bold text-slate-800 text-xs tracking-wider uppercase" colSpan="2">Beban Operasional</td></tr>
+                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Total Beban Usaha Kantor & Gudang</td><td className="py-2.5 text-right text-rose-600 font-medium">({formatIDR(totalOperasional)})</td></tr>
+                    <tr className="border-t-2 border-slate-800 bg-emerald-50/50"><td className="py-4 font-bold text-slate-900 text-base">LABA BERSIH SEBENARNYA (NETO)</td><td className="py-4 text-right font-black text-emerald-700 text-lg">{formatIDR(labaBersihKonsolidasi)}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-8">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="flex justify-between items-start px-6 py-5 border-b border-slate-100 bg-white">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <IconLandmark size={20} className="text-emerald-600" /> Modul Pelaporan Pajak
+                    </h2>
+                    <p className="text-sm text-slate-500 mt-1 font-medium">Estimasi Lampiran I SPT Tahunan Badan.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select value={selectedTaxYear} onChange={(e) => setSelectedTaxYear(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-700 cursor-pointer">
+                      {availableYears.length > 0 ? availableYears.map(year => <option key={year} value={year}>Tahun {year}</option>) : <option value={currentYearStr}>Tahun {currentYearStr}</option>}
+                    </select>
+                    <div className="flex gap-1 ml-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                      <button onClick={() => setPrintData({type: 'tax_report', item: singleYearTaxReport})} className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-white rounded-md transition-colors shadow-sm" title="Cetak Laporan Pajak">
+                        <IconPrinter size={18} />
+                      </button>
+                      <button onClick={() => setPrintData({type: 'tax_report', item: singleYearTaxReport, autoDownload: true})} className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-white rounded-md transition-colors shadow-sm" title="Download PDF Pajak">
+                        <IconDownload size={18} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-0 overflow-x-auto bg-slate-50/30">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <tbody className="divide-y divide-slate-100">
+                      <tr className="hover:bg-white transition-colors"><td className="px-6 py-3.5 font-semibold text-slate-700">Peredaran Usaha</td><td className="px-6 py-3.5 text-right font-bold text-slate-800">{formatIDR(singleYearTaxReport.pendapatan)}</td></tr>
+                      <tr className="hover:bg-white transition-colors"><td className="px-6 py-3.5 font-medium text-slate-500 pl-10">- HPP</td><td className="px-6 py-3.5 text-right text-rose-600 font-medium">({formatIDR(singleYearTaxReport.hpp)})</td></tr>
+                      <tr className="bg-white border-y border-slate-200"><td className="px-6 py-3.5 font-bold text-slate-800">Laba Bruto</td><td className="px-6 py-3.5 text-right font-bold text-blue-700">{formatIDR(singleYearTaxReport.labaBruto)}</td></tr>
+                      <tr className="hover:bg-white transition-colors"><td className="px-6 py-3.5 font-medium text-slate-500 pl-10">- Biaya Usaha</td><td className="px-6 py-3.5 text-right text-rose-600 font-medium">({formatIDR(singleYearTaxReport.operasional)})</td></tr>
+                      <tr className="bg-emerald-50/50 border-t border-emerald-200"><td className="px-6 py-4 font-bold text-emerald-800">Penghasilan Neto</td><td className={`px-6 py-4 text-right font-black text-base ${singleYearTaxReport.GridNeto >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{formatIDR(singleYearTaxReport.GridNeto)}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-1 flex flex-col">
+                <div className="px-6 py-5 border-b border-slate-100 bg-white">
+                  <h2 className="text-lg font-bold text-slate-800">Arus Kas Non-Resmi</h2>
+                  <p className="text-sm text-slate-500 mt-1 font-medium">Pendapatan luar (Non-PPN) tanpa masuk SPT</p>
+                </div>
+                <div className="p-6 overflow-x-auto bg-slate-50/30 flex-1 flex flex-col justify-center">
+                  <div className="flex justify-between items-center pb-4 border-b border-slate-200">
+                    <span className="font-semibold text-slate-600 text-sm">Pemasukan Invoice Non-PPN</span>
+                    <span className="font-bold text-slate-800">{formatIDR(kasMasukNonPPN)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-4">
+                    <span className="font-bold text-slate-800">TOTAL KAS BEBAS</span>
+                    <span className="font-black text-amber-600 text-xl">{formatIDR(kasMasukNonPPN)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+      const renderKalender = () => {
+        const prevMonth = () => {
+          if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(calendarYear - 1); }
+          else { setCalendarMonth(calendarMonth - 1); }
+        };
+        const nextMonth = () => {
+          if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(calendarYear + 1); }
+          else { setCalendarMonth(calendarMonth + 1); }
+        };
+
+        const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+        const dayNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+        const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+        const firstDayOfMonth = new Date(calendarYear, calendarMonth, 1).getDay();
+
+        return (
+          <div className="space-y-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Kalender Proyek</h2>
+                <p className="text-sm text-slate-500 mt-1">Pantau jadwal aktivitas dan pemasukan proyek Anda.</p>
+              </div>
+              <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-2">
+                <button onClick={prevMonth} className="p-2 text-slate-500 hover:bg-blue-50 rounded-xl"><IconChevronLeft size={20} /></button>
+                <div className="w-40 text-center font-bold text-slate-800">{monthNames[calendarMonth]} {calendarYear}</div>
+                <button onClick={nextMonth} className="p-2 text-slate-500 hover:bg-blue-50 rounded-xl"><IconChevronRight size={20} /></button>
+              </div>
+            </div>
+            <div className="flex gap-4 items-center text-xs font-semibold text-slate-500">
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-500"></span> Proyek PPN</div>
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-slate-300"></span> Proyek Non-PPN</div>
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <div className="min-w-[800px]">
+                  <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200">
+                    {dayNames.map(day => <div key={day} className="py-3 text-center text-xs font-black text-slate-500 uppercase tracking-widest border-r border-slate-200">{day}</div>)}
+                  </div>
+                  <div className="grid grid-cols-7 bg-slate-100 gap-px border-b border-slate-200">
+                    {Array.from({ length: firstDayOfMonth }).map((_, i) => <div key={`empty-${i}`} className="bg-slate-50 min-h-[120px]"></div>)}
+                    {Array.from({ length: daysInMonth }).map((_, i) => {
+                      const day = i + 1;
+                      const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const dayEvents = calendarEvents[dateStr] || [];
+                      const isToday = dateStr === new Date().toISOString().substring(0, 10);
+                      return (
+                        <div key={day} className={`bg-white min-h-[130px] p-2 flex flex-col gap-1.5 ${isToday ? 'bg-blue-50/20' : ''}`}>
+                          <div className={`text-xs font-bold self-end w-7 h-7 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>{day}</div>
+                          <div className="flex-1 flex flex-col gap-1.5 overflow-y-auto max-h-[90px] custom-scrollbar pr-1">
+                            {dayEvents.map((ev, idx) => (
+                              <div key={idx} className={`text-[10px] p-1.5 rounded border truncate font-bold ${ev.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700' : 'bg-slate-100 border-slate-200 text-slate-700'}`}>{ev?.customer}</div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const renderPenawaran = () => (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Manajemen Penawaran</h2>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto p-2 bg-white border border-slate-200 rounded-2xl shadow-sm">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
+                <IconFilter size={16} className="text-slate-500" />
+                <select value={filterPrintPnw} onChange={(e) => setFilterPrintPnw(e.target.value)} className="text-sm bg-transparent font-bold outline-none cursor-pointer">
+                  <option value="all">Semua Kategori</option><option value="ppn">Hanya PPN</option><option value="non_ppn">Hanya Non-PPN</option>
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => handlePrintAllPenawaran(false)} className="text-slate-600 hover:bg-slate-100 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2"><IconPrinter size={16} /> Cetak</button>
+                <button onClick={() => handlePrintAllPenawaran(true)} className="text-slate-600 hover:bg-slate-100 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2"><IconDownload size={16} /> PDF</button>
+                <button onClick={() => openNewModal('penawaran')} className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-indigo-700"><IconPlus size={18} /> Buat Baru</button>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
+            <table className="w-full text-left min-w-[800px]">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">No. Dokumen</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Tanggal</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Pelanggan</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Pajak</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-right">Total Estimasi</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(!penawaran || penawaran.length === 0) ? (
+                  <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
+                ) : penawaran.map((pnw) => (
+                  <tr key={pnw?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-6 py-4 font-bold text-indigo-700 text-sm">{pnw?.id}</td>
+                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{pnw?.date}</td>
+                    <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{pnw?.customer}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold ${pnw?.usePpn ? 'bg-indigo-50 border-indigo-100 text-indigo-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{pnw?.usePpn ? 'PPN 11%':'Non-PPN'}</span>
+                    </td>
+                    <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(pnw?.total)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-1 md:opacity-0 md:group-hover:opacity-100">
+                        <button onClick={() => setPrintData({type: 'penawaran', item: pnw})} className="p-1.5 text-slate-400 hover:text-indigo-600"><IconPrinter size={18}/></button>
+                        <button onClick={() => setPrintData({type: 'penawaran', item: pnw, autoDownload: true})} className="p-1.5 text-slate-400 hover:text-rose-600"><IconDownload size={18}/></button>
+                        <button onClick={() => handleEdit('penawaran', pnw)} className="p-1.5 text-slate-400 hover:text-amber-500"><IconEdit size={18}/></button>
+                        <button onClick={() => setDeleteConfirm({type: 'penawaran', id: pnw?.id})} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={18}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Modal Penawaran */}
+          {isPenawaranModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-100">
+                <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="text-xl font-black text-slate-800">{editingId ? 'Edit Penawaran' : 'Formulir Penawaran Baru'}</h3>
+                  <button onClick={() => setPenawaranModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full"><IconX size={24} /></button>
+                </div>
+                <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-white">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Tanggal Buat</label><input type="date" value={penawaranForm.date} onChange={(e) => setPenawaranForm({...penawaranForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Berlaku Sampai</label><input type="date" value={penawaranForm.validUntil} onChange={(e) => setPenawaranForm({...penawaranForm, validUntil: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama Pelanggan</label><input type="text" placeholder="PT Contoh" value={penawaranForm.customer} onChange={(e) => setPenawaranForm({...penawaranForm, customer: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  </div>
+                  <div className="flex items-center gap-3 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100">
+                    <input type="checkbox" id="usePpnTogglePnw" checked={penawaranForm.usePpn} onChange={(e) => setPenawaranForm({...penawaranForm, usePpn: e.target.checked})} className="w-5 h-5 text-indigo-600 rounded border-slate-300" />
+                    <label htmlFor="usePpnTogglePnw" className="text-sm font-black text-indigo-900 cursor-pointer">Sertakan PPN 11%</label>
+                  </div>
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <label className="block text-base font-black text-slate-800">Rincian Item</label>
+                      <button onClick={() => setPenawaranForm({...penawaranForm, items: [...(penawaranForm.items||[]), { desc: '', qty: 1, price: 0 }]})} className="text-sm text-indigo-600 font-bold bg-indigo-50 px-3 py-1.5 rounded-lg"><IconPlus size={16}/></button>
+                    </div>
+                    <div className="space-y-2">
+                      {(penawaranForm.items||[]).map((item, index) => (
+                        <div key={index} className="flex gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                          <input type="text" placeholder="Deskripsi" value={item?.desc} onChange={(e) => { const n = [...(penawaranForm.items||[])]; n[index].desc = e.target.value; setPenawaranForm({...penawaranForm, items: n}); }} className="flex-1 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <input type="number" placeholder="Qty" value={item?.qty} onChange={(e) => { const n = [...(penawaranForm.items||[])]; n[index].qty = Number(e.target.value); setPenawaranForm({...penawaranForm, items: n}); }} className="w-20 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <input type="number" placeholder="Harga" value={item?.price} onChange={(e) => { const n = [...(penawaranForm.items||[])]; n[index].price = Number(e.target.value); setPenawaranForm({...penawaranForm, items: n}); }} className="w-36 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <button onClick={() => { setPenawaranForm({...penawaranForm, items: (penawaranForm.items||[]).filter((_, i) => i !== index)}); }} className="p-1.5 text-rose-500"><IconTrash2 size={18} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border">
+                    <div className="col-span-2"><label className="block text-sm font-bold text-slate-700 mb-1">Catatan</label><textarea rows="2" value={penawaranForm.notes} onChange={(e) => setPenawaranForm({...penawaranForm, notes: e.target.value})} className="w-full border rounded-xl p-3 bg-white outline-none text-sm"></textarea></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama TTD</label><input type="text" value={penawaranForm.signerName} onChange={(e) => setPenawaranForm({...penawaranForm, signerName: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={penawaranForm.signerRole} onChange={(e) => setPenawaranForm({...penawaranForm, signerRole: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
+                  </div>
+                </div>
+                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                  <button onClick={() => setPenawaranModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
+                  <button onClick={handleSavePenawaran} className="px-5 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md">Simpan</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+      const renderInvoice = () => (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div><h2 className="text-2xl font-bold text-slate-800 tracking-tight">Manajemen Invoice</h2></div>
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto p-2 bg-white border border-slate-200 rounded-2xl shadow-sm">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-100">
+                <IconFilter size={16} className="text-slate-500" />
+                <select value={filterPrintInv} onChange={(e) => setFilterPrintInv(e.target.value)} className="text-sm bg-transparent font-bold outline-none cursor-pointer">
+                  <option value="all">Semua Kategori</option><option value="ppn">Hanya PPN</option><option value="non_ppn">Hanya Non-PPN</option>
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => handlePrintAllInvoice(false)} className="text-slate-600 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2 hover:bg-blue-50"><IconPrinter size={16} /> Cetak</button>
+                <button onClick={() => handlePrintAllInvoice(true)} className="text-slate-600 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2 hover:bg-rose-50"><IconDownload size={16} /> PDF</button>
+                <div className="hidden sm:block w-px h-6 bg-slate-200 self-center mx-2"></div>
+                <button onClick={() => openNewModal('invoice')} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-blue-700"><IconPlus size={18} /> Buat Baru</button>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
+            <table className="w-full text-left min-w-[800px]">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">No. Invoice</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Tanggal</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Pelanggan</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Pajak</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-right">Total Tagihan</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(!invoices || invoices.length === 0) ? (
+                  <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
+                ) : invoices.map((inv) => (
+                  <tr key={inv?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-6 py-4 font-bold text-blue-700 text-sm">{inv?.id}</td>
+                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{inv?.date}</td>
+                    <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{inv?.customer}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold ${inv?.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{inv?.usePpn ? 'PPN 11%':'Non-PPN'}</span>
+                    </td>
+                    <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(inv?.total)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
+                        <button onClick={() => setPrintData({type: 'invoice', item: inv})} className="p-1.5 text-slate-400 hover:text-blue-600"><IconPrinter size={18}/></button>
+                        <button onClick={() => setPrintData({type: 'invoice', item: inv, autoDownload: true})} className="p-1.5 text-slate-400 hover:text-rose-600"><IconDownload size={18}/></button>
+                        <button onClick={() => handleEdit('invoice', inv)} className="p-1.5 text-slate-400 hover:text-amber-500"><IconEdit size={18}/></button>
+                        <button onClick={() => setDeleteConfirm({type: 'invoice', id: inv?.id})} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={18}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Modal Invoice */}
+          {isInvoiceModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-100">
+                <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="text-xl font-black text-slate-800">{editingId ? 'Edit Invoice' : 'Buat Invoice Baru'}</h3>
+                  <button onClick={() => setInvoiceModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full"><IconX size={24} /></button>
+                </div>
+                <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-white">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Tanggal</label><input type="date" value={invoiceForm.date} onChange={(e) => setInvoiceForm({...invoiceForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama Pelanggan</label><input type="text" value={invoiceForm.customer} onChange={(e) => setInvoiceForm({...invoiceForm, customer: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  </div>
+                  <div className="flex items-center gap-3 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
+                    <input type="checkbox" id="usePpnToggle" checked={invoiceForm.usePpn} onChange={(e) => setInvoiceForm({...invoiceForm, usePpn: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-slate-300" />
+                    <label htmlFor="usePpnToggle" className="text-sm font-black text-blue-900 cursor-pointer">Tagih PPN 11%</label>
+                  </div>
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <label className="block text-base font-black text-slate-800">Rincian Tagihan</label>
+                      <button onClick={() => setInvoiceForm({...invoiceForm, items: [...(invoiceForm.items||[]), { desc: '', qty: 1, price: 0 }]})} className="text-sm text-blue-600 font-bold bg-blue-50 px-3 py-1.5 rounded-lg"><IconPlus size={16}/></button>
+                    </div>
+                    <div className="space-y-2">
+                      {(invoiceForm.items||[]).map((item, index) => (
+                        <div key={index} className="flex gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                          <input type="text" placeholder="Deskripsi" value={item?.desc} onChange={(e) => { const n = [...(invoiceForm.items||[])]; n[index].desc = e.target.value; setInvoiceForm({...invoiceForm, items: n}); }} className="flex-1 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <input type="number" placeholder="Qty" value={item?.qty} onChange={(e) => { const n = [...(invoiceForm.items||[])]; n[index].qty = Number(e.target.value); setInvoiceForm({...invoiceForm, items: n}); }} className="w-20 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <input type="number" placeholder="Harga" value={item?.price} onChange={(e) => { const n = [...(invoiceForm.items||[])]; n[index].price = Number(e.target.value); setInvoiceForm({...invoiceForm, items: n}); }} className="w-36 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <button onClick={() => { setInvoiceForm({...invoiceForm, items: invoiceForm.items.filter((_, i) => i !== index)}); }} className="p-1.5 text-rose-500"><IconTrash2 size={18} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border">
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama TTD</label><input type="text" value={invoiceForm.signerName} onChange={(e) => setInvoiceForm({...invoiceForm, signerName: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={invoiceForm.signerRole} onChange={(e) => setInvoiceForm({...invoiceForm, signerRole: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
+                  </div>
+                </div>
+                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                  <button onClick={() => setInvoiceModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
+                  <button onClick={handleSaveInvoice} className="px-5 py-2 bg-blue-600 text-white font-bold rounded-xl shadow-md">Simpan</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+      const renderSuratJalan = () => (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div><h2 className="text-2xl font-bold text-slate-800 tracking-tight">Surat Jalan</h2></div>
+            <div className="flex gap-2 p-2 bg-white border border-slate-200 rounded-2xl shadow-sm">
+              <button onClick={() => setPrintData({type: 'sj', item: suratJalan})} className="text-slate-600 hover:bg-slate-100 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2"><IconPrinter size={16} /> Cetak Semua</button>
+              <button onClick={() => setPrintData({type: 'sj', item: suratJalan, autoDownload: true})} className="text-slate-600 hover:bg-slate-100 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2"><IconDownload size={16} /> PDF Semua</button>
+              <div className="hidden sm:block w-px h-6 bg-slate-200 self-center mx-1"></div>
+              <button onClick={() => openNewModal('sj')} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2"><IconPlus size={18} /> Buat Baru</button>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
+            <table className="w-full text-left min-w-[800px]">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">No. Surat Jalan</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Tanggal</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Tujuan</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Ekspedisi</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(!suratJalan || suratJalan.length === 0) ? (
+                  <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
+                ) : suratJalan.map((sj) => (
+                  <tr key={sj?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-6 py-4 font-bold text-emerald-700 text-sm">{sj?.id}</td>
+                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{sj?.date}</td>
+                    <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{sj?.customer}</td>
+                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{sj?.driver} <span className="text-slate-400">({sj?.vehicle})</span></td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
+                        <button onClick={() => setPrintData({type: 'sj', item: sj})} className="p-1.5 text-slate-400 hover:text-emerald-600"><IconPrinter size={18}/></button>
+                        <button onClick={() => setPrintData({type: 'sj', item: sj, autoDownload: true})} className="p-1.5 text-slate-400 hover:text-rose-600"><IconDownload size={18}/></button>
+                        <button onClick={() => handleEdit('sj', sj)} className="p-1.5 text-slate-400 hover:text-amber-500"><IconEdit size={18}/></button>
+                        <button onClick={() => setDeleteConfirm({type: 'sj', id: sj?.id})} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={18}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Modal SJ */}
+          {isSJModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-100">
+                <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="text-xl font-black text-slate-800">{editingId ? 'Edit Surat Jalan' : 'Buat Surat Jalan'}</h3>
+                  <button onClick={() => setSJModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full"><IconX size={24} /></button>
+                </div>
+                <div className="p-6 overflow-y-auto space-y-6 flex-1 bg-white">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Tanggal Pengiriman</label><input type="date" value={sjForm.date} onChange={(e) => setSjForm({...sjForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Tujuan</label><input type="text" value={sjForm.customer} onChange={(e) => setSjForm({...sjForm, customer: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Pengemudi</label><input type="text" value={sjForm.driver} onChange={(e) => setSjForm({...sjForm, driver: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Plat Kendaraan</label><input type="text" value={sjForm.vehicle} onChange={(e) => setSjForm({...sjForm, vehicle: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <label className="block text-base font-black text-slate-800">Daftar Muatan</label>
+                      <button onClick={() => setSjForm({...sjForm, items: [...(sjForm.items||[]), { desc: '', qty: 1 }]})} className="text-sm text-emerald-600 font-bold bg-emerald-50 px-3 py-1.5 rounded-lg"><IconPlus size={16}/></button>
+                    </div>
+                    <div className="space-y-2">
+                      {(sjForm.items||[]).map((item, index) => (
+                        <div key={index} className="flex gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                          <input type="text" placeholder="Nama Barang" value={item?.desc} onChange={(e) => { const n = [...(sjForm.items||[])]; n[index].desc = e.target.value; setSjForm({...sjForm, items: n}); }} className="flex-1 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <input type="number" placeholder="Qty" value={item?.qty} onChange={(e) => { const n = [...(sjForm.items||[])]; n[index].qty = Number(e.target.value); setSjForm({...sjForm, items: n}); }} className="w-24 bg-white border rounded-lg px-3 py-1.5 text-sm outline-none" />
+                          <button onClick={() => { setSjForm({...sjForm, items: sjForm.items.filter((_, i) => i !== index)}); }} className="p-1.5 text-rose-500"><IconTrash2 size={18} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border">
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama TTD</label><input type="text" value={sjForm.signerName} onChange={(e) => setSjForm({...sjForm, signerName: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={sjForm.signerRole} onChange={(e) => setSjForm({...sjForm, signerRole: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
+                  </div>
+                </div>
+                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                  <button onClick={() => setSJModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
+                  <button onClick={handleSaveSJ} className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl">Simpan</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+      const renderKwitansi = () => (
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div><h2 className="text-2xl font-bold text-slate-800 tracking-tight">Kwitansi</h2></div>
+            <div className="flex gap-2 p-2 bg-white border border-slate-200 rounded-2xl shadow-sm">
+              <button onClick={() => setPrintData({type: 'kwitansi', item: kwitansi})} className="text-slate-600 hover:bg-slate-100 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2"><IconPrinter size={16} /> Cetak Semua</button>
+              <button onClick={() => setPrintData({type: 'kwitansi', item: kwitansi, autoDownload: true})} className="text-slate-600 hover:bg-slate-100 font-bold px-4 py-2 rounded-xl text-sm flex items-center gap-2"><IconDownload size={16} /> PDF Semua</button>
+              <button onClick={() => openNewModal('kwitansi')} className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2"><IconPlus size={18} /> Buat Baru</button>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
+            <table className="w-full text-left min-w-[800px]">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">No. Dokumen</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Tanggal</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Penyetor</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Keterangan</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-right">Nominal</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(!kwitansi || kwitansi.length === 0) ? (
+                  <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
+                ) : kwitansi.map((kwt) => (
+                  <tr key={kwt?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-6 py-4 font-bold text-amber-700 text-sm">{kwt?.id}</td>
+                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{kwt?.date}</td>
+                    <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{kwt?.receivedFrom}</td>
+                    <td className="px-6 py-4 text-slate-600 text-sm">{kwt?.purpose}</td>
+                    <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(kwt?.amount)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
+                        <button onClick={() => setPrintData({type: 'kwitansi', item: kwt})} className="p-1.5 text-slate-400 hover:text-amber-600"><IconPrinter size={18}/></button>
+                        <button onClick={() => setPrintData({type: 'kwitansi', item: kwt, autoDownload: true})} className="p-1.5 text-slate-400 hover:text-rose-600"><IconDownload size={18}/></button>
+                        <button onClick={() => handleEdit('kwitansi', kwt)} className="p-1.5 text-slate-400 hover:text-amber-500"><IconEdit size={18}/></button>
+                        <button onClick={() => setDeleteConfirm({type: 'kwitansi', id: kwt?.id})} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={18}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Modal Kwitansi */}
+          {isKwitansiModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col border border-slate-100">
+                <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="text-xl font-bold text-slate-800">{editingId ? 'Edit Kwitansi' : 'Buat Kwitansi'}</h3>
+                  <button onClick={() => setKwitansiModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full"><IconX size={24} /></button>
+                </div>
+                <div className="p-6 space-y-4 bg-white">
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">Tanggal</label><input type="date" value={kwitansiForm.date} onChange={(e) => setKwitansiForm({...kwitansiForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">Telah Terima Dari</label><input type="text" value={kwitansiForm.receivedFrom} onChange={(e) => setKwitansiForm({...kwitansiForm, receivedFrom: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">Jumlah Uang (Rp)</label><input type="number" value={kwitansiForm.amount} onChange={(e) => setKwitansiForm({...kwitansiForm, amount: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">Keterangan</label><textarea rows="2" value={kwitansiForm.purpose} onChange={(e) => setKwitansiForm({...kwitansiForm, purpose: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none"></textarea></div>
+                  <div className="bg-slate-50 p-3 rounded-xl border space-y-2">
+                    <div><label className="block text-xs font-bold text-slate-700 mb-1">Nama TTD</label><input type="text" value={kwitansiForm.signerName} onChange={(e) => setKwitansiForm({...kwitansiForm, signerName: e.target.value})} className="w-full border rounded-lg px-3 py-1.5 text-xs outline-none" /></div>
+                    <div><label className="block text-xs font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={kwitansiForm.signerRole} onChange={(e) => setKwitansiForm({...kwitansiForm, signerRole: e.target.value})} className="w-full border rounded-lg px-3 py-1.5 text-xs outline-none" /></div>
+                  </div>
+                </div>
+                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                  <button onClick={() => setKwitansiModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
+                  <button onClick={handleSaveKwitansi} className="px-5 py-2 bg-amber-600 text-white font-bold rounded-xl">Simpan</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+      const renderPengeluaran = () => (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div><h2 className="text-2xl font-bold text-slate-800 tracking-tight">Catatan Pengeluaran</h2></div>
+            <button onClick={() => openNewModal('expense')} className="bg-rose-600 hover:bg-rose-700 text-white px-5 py-2 rounded-lg font-semibold flex items-center gap-2"><IconPlus size={20} /> Catat Beban</button>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
+            <table className="w-full text-left min-w-[600px]">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                <tr>
+                  <th className="px-6 py-4 text-xs font-bold uppercase">No. Ref</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase">Tanggal</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase">Deskripsi</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase">Kategori</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase text-right">Nominal Beban</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(!expenses || expenses.length === 0) ? (
+                    <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada pengeluaran tercatat.</td></tr>
+                ) : expenses.map((exp) => (
+                  <tr key={exp?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-6 py-4 font-semibold text-slate-500 text-sm">{exp?.id}</td>
+                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{exp?.date}</td>
+                    <td className="px-6 py-4 text-slate-800 text-sm font-medium">{exp?.desc}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.category === 'HPP' ? 'bg-orange-50 border-orange-100 text-orange-700':'bg-purple-50 border-purple-100 text-purple-700'}`}>{exp?.category}</span>
+                    </td>
+                    <td className="px-6 py-4 text-right font-bold text-rose-600">{formatIDR(exp?.amount)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
+                        <button onClick={() => handleEdit('expense', exp)} className="p-1.5 text-slate-400 hover:text-amber-500"><IconEdit size={18}/></button>
+                        <button onClick={() => setDeleteConfirm({type: 'expense', id: exp?.id})} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={18}/></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Modal Beban */}
+          {isExpenseModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-slate-100">
+                <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
+                  <h3 className="text-xl font-bold text-slate-800">{editingId ? 'Edit Pengeluaran' : 'Catat Pengeluaran Baru'}</h3>
+                  <button onClick={() => setExpenseModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full"><IconX size={24} /></button>
+                </div>
+                <div className="p-6 space-y-4 bg-white">
+                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Tanggal</label><input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Deskripsi Beban</label><input type="text" value={expenseForm.desc} onChange={(e) => setExpenseForm({...expenseForm, desc: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Kategori Akuntansi</label><select value={expenseForm.category} onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none font-medium cursor-pointer"><option value="Operasional">Beban Operasional (Biaya Usaha)</option><option value="HPP">HPP (Modal / Beban Pokok Penjualan)</option></select></div>
+                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Nominal (Rp)</label><input type="number" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                </div>
+                <div className="p-6 border-t bg-slate-50 flex justify-end gap-2">
+                  <button onClick={() => setExpenseModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
+                  <button onClick={handleSaveExpense} className="px-6 py-2 bg-rose-600 text-white font-bold rounded-xl">Simpan Beban</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+      return (
+        <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans relative">
+          {deleteConfirm && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 text-center border">
+                <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-rose-100"><IconAlertCircle size={32} /></div>
+                <h3 className="text-xl font-black text-slate-800 mb-1">Hapus Data?</h3>
+                <p className="text-sm text-slate-500 mb-6">Sistem akan otomatis mengatur ulang nomor surat yang tersisa.</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-sm">Batal</button>
+                  <button onClick={executeDelete} className="flex-1 py-2 bg-rose-600 text-white font-bold rounded-xl text-sm">Hapus</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <input ref={restoreInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleRestoreFile} />
+          {restorePreview && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 border">
+                <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mb-4 border border-amber-100"><IconUpload size={26} /></div>
+                <h3 className="text-xl font-black text-slate-800">Pulihkan dari backup?</h3>
+                <p className="text-sm text-slate-500 mt-1 break-all">{restorePreview.fileName}</p>
+                <div className="grid grid-cols-2 gap-2 mt-4 text-sm">
+                  {[['Penawaran', 'penawaran'], ['Invoice', 'invoices'], ['Surat Jalan', 'suratJalan'], ['Kwitansi', 'kwitansi'], ['Pengeluaran', 'expenses']].map(([label, k]) => (
+                    <div key={k} className="flex justify-between bg-slate-50 border rounded-lg px-3 py-2"><span className="text-slate-500">{label}</span><b>{Array.isArray(restorePreview.data[k]) ? restorePreview.data[k].length : 0}</b></div>
+                  ))}
+                </div>
+                <p className="text-xs text-rose-600 font-semibold mt-4">Semua data saat ini akan DIGANTI dengan isi file ini{isAPI ? ' dan disimpan ke Google Drive' : ''}. Data saat ini otomatis diunduh dulu sebagai cadangan.</p>
+                <div className="flex gap-3 mt-6">
+                  <button onClick={() => setRestorePreview(null)} className="flex-1 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-sm">Batal</button>
+                  <button onClick={applyRestore} className="flex-1 py-2 bg-amber-600 text-white font-bold rounded-xl text-sm">Ganti Data</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <header className="bg-ink-900 border-b border-slate-800 h-16 flex items-center justify-between px-4 md:px-8 shadow-md z-30 sticky top-0">
+            <div className="flex items-center gap-3">
+              <img src={LOGO_URL} alt="Logo" className="w-10 h-10 object-contain bg-white rounded-md p-1 shadow-sm" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+              <div>
+                <h1 className="text-white text-sm font-black tracking-wider leading-tight">NURI VIRA PRATAMA</h1>
+                <span className="text-red-400 text-[10px] font-bold uppercase tracking-widest">Finance & Admin</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 sm:gap-4">
+              <button onClick={() => handleBackup()} className="flex items-center gap-1.5 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 hover:border-slate-500 px-2.5 sm:px-3 py-1.5 rounded-lg" title="Unduh backup data (JSON)">
+                <IconDownload size={15}/> <span className="hidden lg:inline">Backup</span>
+              </button>
+              <button onClick={() => restoreInputRef.current && restoreInputRef.current.click()} className="flex items-center gap-1.5 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 hover:border-slate-500 px-2.5 sm:px-3 py-1.5 rounded-lg" title="Pulihkan data dari file backup">
+                <IconUpload size={15}/> <span className="hidden lg:inline">Pulihkan</span>
+              </button>
+              <button onClick={onBackToSite} className="flex items-center gap-1.5 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg" title="Lihat Website">
+                <IconGlobe size={15}/> <span className="hidden sm:inline">Website</span>
+              </button>
+              <div className="hidden sm:block text-right">
+                <div className="flex items-center justify-end gap-2">
+                  <p className="text-sm font-bold text-slate-100 leading-tight">{currentUser?.name}</p>
+                  {isSyncing && <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full">Menyimpan...</span>}
+                  {!isSyncing && syncError && <span className="text-[10px] bg-rose-600 text-white px-2 py-0.5 rounded-full">Belum tersimpan</span>}
+                </div>
+                <p className="text-xs font-medium text-slate-400">{currentUser?.username}</p>
+              </div>
+              <div className="w-9 h-9 bg-red-600 text-white rounded-full flex items-center justify-center font-bold border border-red-500">{currentUser?.initial}</div>
+              <button onClick={handleLogout} className="text-slate-400 hover:text-rose-400 p-2 rounded-full hover:bg-slate-800" title="Keluar"><IconLogOut size={20} /></button>
+            </div>
+          </header>
+          <div className="hazard h-1 sticky top-16 z-30"></div>
+
+          <nav className="bg-white border-b border-slate-200 shadow-sm hidden md:flex items-center justify-center z-20 sticky top-[68px]">
+            <div className="flex overflow-x-auto w-full max-w-7xl px-8 gap-2">
+              <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'dashboard' ? 'border-blue-600 text-blue-600 bg-blue-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconDashboard size={18}/> Dasbor Utama</button>
+              <button onClick={() => setActiveTab('kalender')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'kalender' ? 'border-cyan-600 text-cyan-600 bg-cyan-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconCalendar size={18}/> Kalender Proyek</button>
+              <button onClick={() => setActiveTab('penawaran')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'penawaran' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconBriefcase size={18}/> Penawaran</button>
+              <button onClick={() => setActiveTab('invoice')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'invoice' ? 'border-blue-600 text-blue-600 bg-blue-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconFileText size={18}/> Invoice</button>
+              <button onClick={() => setActiveTab('suratjalan')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'suratjalan' ? 'border-emerald-600 text-emerald-600 bg-emerald-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTruck size={18}/> Surat Jalan</button>
+              <button onClick={() => setActiveTab('kwitansi')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'kwitansi' ? 'border-amber-600 text-amber-600 bg-amber-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconReceipt size={18}/> Kwitansi</button>
+              <button onClick={() => setActiveTab('pengeluaran')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'pengeluaran' ? 'border-rose-600 text-rose-600 bg-rose-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTrendingDown size={18}/> Pengeluaran</button>
+            </div>
+          </nav>
+
+          <main className="flex-1 overflow-auto p-4 md:p-8 pb-24 md:pb-8">
+            <div className="max-w-7xl mx-auto">
+              {syncError && (
+                <div className="mb-6 flex flex-col sm:flex-row sm:items-center gap-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-4 text-sm font-semibold">
+                  <div className="flex items-start gap-3 flex-1"><IconAlertCircle size={20}/> <span>{syncError}</span></div>
+                  <div className="flex gap-2">
+                    {isAPI && <button onClick={() => saveToServer({ penawaran, invoices, expenses, suratJalan, kwitansi })} disabled={isSyncing} className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold disabled:opacity-60">{isSyncing ? 'Menyimpan...' : 'Coba simpan lagi'}</button>}
+                    <button onClick={() => setSyncError('')} className="px-3 py-2 bg-white border border-rose-200 rounded-xl text-xs font-bold">Tutup</button>
+                  </div>
+                </div>
+              )}
+              {loadError && (
+                <div className="mb-6 flex items-start gap-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-4 text-sm font-semibold">
+                  <IconAlertCircle size={20}/> <span>{loadError}</span>
+                </div>
+              )}
+              {activeTab === 'dashboard' && renderDashboard()}
+              {activeTab === 'kalender' && renderKalender()}
+              {activeTab === 'penawaran' && renderPenawaran()}
+              {activeTab === 'invoice' && renderInvoice()}
+              {activeTab === 'suratjalan' && renderSuratJalan()}
+              {activeTab === 'kwitansi' && renderKwitansi()}
+              {activeTab === 'pengeluaran' && renderPengeluaran()}
+            </div>
+          </main>
+
+          <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-slate-200 flex overflow-x-auto gap-2 p-2 z-40 text-[10px] font-bold shadow-[0_-4px_6px_-1px_rgb(0,0,0,0.05)] pb-[env(safe-area-inset-bottom)] custom-scrollbar">
+            <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'dashboard' ? 'text-blue-600 bg-blue-50':'text-slate-400'}`}><IconDashboard size={20}/> Dasbor</button>
+            <button onClick={() => setActiveTab('kalender')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'kalender' ? 'text-cyan-600 bg-cyan-50':'text-slate-400'}`}><IconCalendar size={20}/> Kalender</button>
+            <button onClick={() => setActiveTab('penawaran')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'penawaran' ? 'text-indigo-600 bg-indigo-50':'text-slate-400'}`}><IconBriefcase size={20}/> PNW</button>
+            <button onClick={() => setActiveTab('invoice')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'invoice' ? 'text-blue-600 bg-blue-50':'text-slate-400'}`}><IconFileText size={20}/> INV</button>
+            <button onClick={() => setActiveTab('suratjalan')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'suratjalan' ? 'text-emerald-600 bg-emerald-50':'text-slate-400'}`}><IconTruck size={20}/> SJ</button>
+            <button onClick={() => setActiveTab('kwitansi')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'kwitansi' ? 'text-amber-600 bg-amber-50':'text-slate-400'}`}><IconReceipt size={20}/> KWT</button>
+            <button onClick={() => setActiveTab('pengeluaran')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'pengeluaran' ? 'text-rose-600 bg-rose-50':'text-slate-400'}`}><IconTrendingDown size={20}/> Beban</button>
+          </nav>
+        </div>
+      );
+    }
+
+    // =====================================================================
+    // ROOT — Website publik + Portal dalam satu file
+    // Portal tetap ter-mount setelah dibuka, supaya auto-save yang sedang
+    // berjalan tidak terputus saat pengguna kembali ke website.
+    // =====================================================================
+    function Root() {
+      const startInPortal = (window.location.hash || '').toLowerCase() === '#portal';
+      const [mode, setMode] = useState(startInPortal ? 'portal' : 'site');
+      const [portalMounted, setPortalMounted] = useState(startInPortal);
+
+      const openPortal = () => { setPortalMounted(true); setMode('portal'); window.scrollTo(0, 0); };
+      const backToSite = () => { setMode('site'); window.scrollTo(0, 0); };
+
+      return (
+        <>
+          <div style={{ display: mode === 'site' ? 'block' : 'none' }}>
+            <Website onOpenPortal={openPortal} />
+          </div>
+          {portalMounted && (
+            <div style={{ display: mode === 'portal' ? 'block' : 'none' }}>
+              <App onBackToSite={backToSite} />
+            </div>
+          )}
+        </>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<Root />);
+  </script>
+</body>
+</html>

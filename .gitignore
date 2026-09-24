@@ -1,0 +1,6 @@
+# Jangan pernah commit data keuangan ke GitHub
+*.json
+!package.json
+backup/
+.DS_Store
+Thumbs.db
