@@ -3,8 +3,60 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PT Nuri Vira Pratama | Viopran Fire Extinguisher</title>
-  <meta name="description" content="PT Nuri Vira Pratama — Viopran Fire Extinguisher. Suplier peralatan proteksi kebakaran: APAR, isi ulang, perawatan berkala, dan sertifikasi.">
+  <title>Viopran — Jual &amp; Isi Ulang APAR Jakarta | PT Nuri Vira Pratama</title>
+  <meta name="description" content="Viopran Fire Extinguisher dari PT Nuri Vira Pratama: suplier APAR (powder, CO2, foam, clean agent), isi ulang, inspeksi berkala, dan sertifikasi di Cakung, Jakarta Timur. Hubungi 0856-7725-758.">
+  <link rel="canonical" href="https://viopran.com/">
+  <meta name="robots" content="index, follow">
+  <meta name="google-site-verification" content="c6f8Xo0WRW0oU1_oz1OUGlvNJgNX7JxWd6dBA81pFu8" />
+  <meta name="theme-color" content="#0b0f14">
+
+  <!-- Pratinjau saat link dibagikan (WhatsApp, Facebook, dll.) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Viopran — PT Nuri Vira Pratama">
+  <meta property="og:title" content="Viopran — Jual &amp; Isi Ulang APAR Jakarta">
+  <meta property="og:description" content="Pengadaan APAR, isi ulang, inspeksi berkala, dan sertifikasi proteksi kebakaran. PT Nuri Vira Pratama, Cakung, Jakarta Timur.">
+  <meta property="og:url" content="https://viopran.com/">
+  <meta property="og:image" content="https://lh3.googleusercontent.com/d/1b8ugifkonN7WtQcNn74-2hI2ey6WRhkd">
+  <meta property="og:locale" content="id_ID">
+  <meta name="twitter:card" content="summary">
+
+  <!-- Data bisnis untuk Google (schema.org) -->
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "LocalBusiness",
+  "@id": "https://viopran.com/#bisnis",
+  "name": "Viopran Fire Extinguisher",
+  "alternateName": [
+    "Viopran",
+    "PT Nuri Vira Pratama"
+  ],
+  "legalName": "PT Nuri Vira Pratama",
+  "description": "Suplier peralatan proteksi kebakaran dan sertifikasi: pengadaan APAR, isi ulang, inspeksi & perawatan berkala.",
+  "url": "https://viopran.com/",
+  "logo": "https://lh3.googleusercontent.com/d/1b8ugifkonN7WtQcNn74-2hI2ey6WRhkd",
+  "image": "https://lh3.googleusercontent.com/d/1b8ugifkonN7WtQcNn74-2hI2ey6WRhkd",
+  "telephone": "+62-856-7725-758",
+  "email": "ptnurivirapratama@gmail.com",
+  "hasMap": "https://www.google.com/maps/search/?api=1&query=PT+Nuri+Vira+Pratama+Penggilingan+Cakung",
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "Jl. Raya Penggilingan, Pertokoan Pasar Jl. Komarudin Lama, Penggilingan, Kec. Cakung",
+    "addressLocality": "Kota Jakarta Timur",
+    "addressRegion": "DKI Jakarta",
+    "postalCode": "13940",
+    "addressCountry": "ID"
+  },
+  "areaServed": "Jakarta",
+  "knowsAbout": [
+    "APAR",
+    "Alat Pemadam Api Ringan",
+    "Isi ulang APAR",
+    "Proteksi kebakaran",
+    "Sertifikasi APAR"
+  ]
+}
+  </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -148,7 +200,8 @@
       name: 'PT Nuri Vira Pratama',
       brand: 'Viopran Fire Extinguisher',
       tagline: 'Suplier Peralatan Proteksi Kebakaran dan Sertifikasi',
-      address: 'Jln. Raya Penggilingan, Komp. Pasar Lama Komarudin, Kec. Cakung, Jakarta Timur',
+      address: 'Jl. Raya Penggilingan, Pertokoan Pasar Jl. Komarudin Lama, Penggilingan, Kec. Cakung, Kota Jakarta Timur, DKI Jakarta 13940',
+      mapsUrl: 'https://www.google.com/maps/search/?api=1&query=PT+Nuri+Vira+Pratama+Penggilingan+Cakung',
       phone: '0856-7725-758',
       waNumber: '628567725758',
       email: 'ptnurivirapratama@gmail.com',
@@ -259,6 +312,171 @@
       { k: 'S', title: 'Sapukan', desc: 'Sapukan dari sisi ke sisi hingga api padam.' },
     ];
 
+    // =====================================================================
+    // BERITA — diambil langsung dari portal RuangK3 (kategori "Informasi Umum")
+    // Data dibaca dari Firebase milik ruangk3.com memakai login anonim,
+    // sama seperti yang dilakukan halaman publik ruangk3.com.
+    // =====================================================================
+    const RK3 = {
+      site: 'https://ruangk3.com/',
+      beritaUrl: 'https://ruangk3.com/#berita',
+      apiKey: 'AIzaSyA2ow2lR4Z3lX7zBcZC5Xg3eWlDm7KNAAg', // kunci publik Firebase (sama dengan di ruangk3.com)
+      db: 'https://portal-k3-bidang-kebakaran-default-rtdb.asia-southeast1.firebasedatabase.app/artifacts/k3-kebakaran-app-v5/public/data/berita',
+      kategori: 'Informasi Umum',
+      max: 6,                    // jumlah berita yang ditampilkan
+      cacheMenit: 30,            // simpan sementara di browser pengunjung agar hemat kuota Firebase
+    };
+
+    const IconNews = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>;
+    const IconExternal = ({size=16}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>;
+
+    const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+    const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) {} };
+
+    async function rk3Token(force) {
+      const now = Date.now();
+      const s = force ? null : lsGet('rk3_anon');
+      if (s && s.idToken && s.exp > now + 60000) return s.idToken;
+      let j = null;
+      if (s && s.refreshToken) {
+        try {
+          const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${RK3.apiKey}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(s.refreshToken),
+          });
+          const d = await r.json();
+          if (d.id_token) j = { idToken: d.id_token, refreshToken: d.refresh_token, expiresIn: d.expires_in };
+        } catch (e) {}
+      }
+      if (!j) {
+        const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${RK3.apiKey}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }),
+        });
+        const d = await r.json();
+        if (!d.idToken) throw new Error('login anonim gagal');
+        j = { idToken: d.idToken, refreshToken: d.refreshToken, expiresIn: d.expiresIn };
+      }
+      const saved = { idToken: j.idToken, refreshToken: j.refreshToken, exp: now + (Number(j.expiresIn) || 3600) * 1000 };
+      lsSet('rk3_anon', saved);
+      return saved.idToken;
+    }
+
+    async function loadRk3News() {
+      const cached = lsGet('rk3_news');
+      if (cached && Array.isArray(cached.items) && cached.t > Date.now() - RK3.cacheMenit * 60000) return cached.items;
+
+      const run = async (token) => {
+        const A = 'auth=' + encodeURIComponent(token);
+        const get = async (path, extra = '') => {
+          const r = await fetch(`${RK3.db}${path}.json?${A}${extra}`);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        };
+        const keys = Object.keys((await get('', '&shallow=true')) || {});
+        const meta = await Promise.all(keys.map(async (k) => {
+          const [kategori, ts] = await Promise.all([get(`/${k}/kategori`), get(`/${k}/timestamp`)]);
+          return { id: k, kategori, ts: Number(ts) || 0 };
+        }));
+        const pilih = meta.filter(m => m.kategori === RK3.kategori).sort((a, b) => b.ts - a.ts).slice(0, RK3.max);
+        return Promise.all(pilih.map(async (m) => {
+          const [judul, isi, f0] = await Promise.all([get(`/${m.id}/judul`), get(`/${m.id}/isi`), get(`/${m.id}/fotoBase64/0`).catch(() => null)]);
+          const isImg = (v) => typeof v === 'string' && /^(data:image\/|https:\/\/)/.test(v);
+          let foto = isImg(f0) ? f0 : null;
+          if (!foto) { const one = await get(`/${m.id}/fotoBase64`).catch(() => null); if (isImg(one)) foto = one; }
+          return { id: m.id, ts: m.ts, judul: String(judul || '').trim(), isi: String(isi || '').trim(), foto };
+        }));
+      };
+
+      let items;
+      try { items = await run(await rk3Token()); }
+      catch (e) { lsDel('rk3_anon'); items = await run(await rk3Token(true)); } // token kedaluwarsa → login ulang sekali
+      lsSet('rk3_news', { t: Date.now(), items });
+      return items;
+    }
+
+    function NewsSection() {
+      const ref = useRef(null);
+      const [state, setState] = useState({ status: 'idle', items: [] });
+
+      useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        let started = false;
+        const start = () => {
+          if (started) return; started = true;
+          setState({ status: 'loading', items: [] });
+          loadRk3News()
+            .then(items => setState({ status: items.length ? 'ok' : 'empty', items }))
+            .catch(() => setState({ status: 'error', items: [] }));
+        };
+        if (!('IntersectionObserver' in window)) { start(); return; }
+        const io = new IntersectionObserver((entries) => { if (entries.some(e => e.isIntersecting)) { start(); io.disconnect(); } }, { rootMargin: '400px' });
+        io.observe(el);
+        return () => io.disconnect();
+      }, []);
+
+      const fmt = (ts) => ts ? new Date(ts).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+
+      return (
+        <section id="berita" ref={ref} className="py-20 md:py-28 bg-white scroll-mt-20">
+          <div className="max-w-7xl mx-auto px-4 md:px-6">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+              <div>
+                <p className="text-fire-600 font-bold text-xs uppercase tracking-[0.2em]">Berita</p>
+                <h2 className="font-display uppercase text-4xl md:text-5xl font-extrabold text-slate-900 mt-2">Informasi K3 &amp; Kebakaran</h2>
+                <p className="text-slate-600 mt-3 max-w-xl">Kabar kegiatan, pelatihan, dan informasi umum keselamatan kebakaran dari portal <b>RuangK3</b>.</p>
+              </div>
+              <a href={RK3.beritaUrl} target="_blank" rel="noopener" className="inline-flex items-center gap-2 self-start md:self-auto border border-slate-300 hover:border-fire-600 hover:text-fire-600 text-slate-700 px-5 py-2.5 rounded-xl font-bold text-sm">
+                Semua berita di RuangK3 <IconExternal size={15}/>
+              </a>
+            </div>
+
+            {(state.status === 'idle' || state.status === 'loading') && (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6" aria-label="Memuat berita">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="rounded-2xl border border-slate-200 overflow-hidden animate-pulse">
+                    <div className="aspect-[4/3] bg-slate-200"></div>
+                    <div className="p-5 space-y-3"><div className="h-3 w-24 bg-slate-200 rounded"></div><div className="h-5 w-4/5 bg-slate-200 rounded"></div><div className="h-3 w-full bg-slate-100 rounded"></div><div className="h-3 w-2/3 bg-slate-100 rounded"></div></div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {state.status === 'ok' && (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {state.items.map(b => (
+                  <a key={b.id} href={RK3.beritaUrl} target="_blank" rel="noopener" title={`Baca "${b.judul}" di RuangK3`} className="group bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all flex flex-col">
+                    <div className="relative aspect-[4/3] bg-ink-800 overflow-hidden">
+                      {b.foto
+                        ? <img src={b.foto} alt={b.judul} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                        : <div className="w-full h-full flex items-center justify-center text-fire-400 grid-lines"><IconFlame size={48}/></div>}
+                      <span className="absolute top-3 left-3 bg-white/95 text-sky-700 text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full">{RK3.kategori}</span>
+                    </div>
+                    <div className="p-5 flex flex-col flex-1">
+                      <div className="text-xs text-slate-500 font-semibold">{fmt(b.ts)}</div>
+                      <h3 className="font-black text-lg text-slate-900 mt-1 leading-snug group-hover:text-fire-600" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{b.judul || 'Tanpa judul'}</h3>
+                      <p className="text-sm text-slate-600 mt-2 leading-relaxed flex-1" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{b.isi}</p>
+                      <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-bold text-fire-600">Baca di RuangK3 <IconExternal size={14}/></span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+
+            {(state.status === 'empty' || state.status === 'error') && (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
+                <div className="w-12 h-12 rounded-xl bg-fire-600 text-white flex items-center justify-center mx-auto"><IconNews size={22}/></div>
+                <p className="font-bold text-slate-900 mt-4">{state.status === 'empty' ? 'Belum ada berita terbaru.' : 'Berita belum dapat dimuat saat ini.'}</p>
+                <p className="text-sm text-slate-500 mt-1">Lihat informasi terbaru langsung di portal RuangK3.</p>
+                <a href={RK3.beritaUrl} target="_blank" rel="noopener" className="inline-flex items-center gap-2 mt-5 bg-fire-600 hover:bg-fire-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm">Buka ruangk3.com <IconExternal size={15}/></a>
+              </div>
+            )}
+          </div>
+        </section>
+      );
+    }
+
     function Website({ onOpenPortal }) {
       const [menuOpen, setMenuOpen] = useState(false);
       const [scrolled, setScrolled] = useState(false);
@@ -278,7 +496,7 @@
       };
 
       const NAV = [
-        ['beranda', 'Beranda'], ['produk', 'Produk'], ['layanan', 'Layanan'], ['panduan', 'Panduan APAR'], ['tentang', 'Tentang'], ['kontak', 'Kontak'],
+        ['beranda', 'Beranda'], ['produk', 'Produk'], ['layanan', 'Layanan'], ['panduan', 'Panduan APAR'], ['berita', 'Berita'], ['tentang', 'Tentang'], ['kontak', 'Kontak'],
       ];
 
       const submitInquiry = (e) => {
@@ -530,8 +748,11 @@
             </div>
           </section>
 
+          {/* BERITA (dari RuangK3) */}
+          <NewsSection />
+
           {/* TENTANG */}
-          <section id="tentang" className="py-20 md:py-28 bg-white scroll-mt-20">
+          <section id="tentang" className="py-20 md:py-28 bg-white border-t border-slate-100 scroll-mt-20">
             <div className="max-w-7xl mx-auto px-4 md:px-6 grid lg:grid-cols-5 gap-12 items-center">
               <div className="lg:col-span-2">
                 <div className="relative bg-ink-900 rounded-3xl p-10 overflow-hidden">
@@ -587,7 +808,7 @@
                     <div className="w-11 h-11 rounded-xl bg-fire-600 flex items-center justify-center shrink-0"><IconMail size={20}/></div>
                     <div className="min-w-0"><div className="text-xs text-slate-400 font-semibold">Email</div><div className="font-bold break-all">{COMPANY.email}</div></div>
                   </a>
-                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(COMPANY.address)}`} target="_blank" rel="noopener" className="flex items-center gap-4 bg-white/5 border border-white/10 hover:border-fire-500/60 rounded-2xl p-4">
+                  <a href={COMPANY.mapsUrl} target="_blank" rel="noopener" className="flex items-center gap-4 bg-white/5 border border-white/10 hover:border-fire-500/60 rounded-2xl p-4">
                     <div className="w-11 h-11 rounded-xl bg-fire-600 flex items-center justify-center shrink-0"><IconMapPin size={20}/></div>
                     <div><div className="text-xs text-slate-400 font-semibold">Alamat</div><div className="font-bold text-sm">{COMPANY.address}</div></div>
                   </a>
