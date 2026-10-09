@@ -2,7 +2,7 @@
  * =====================================================================
  *  API untuk website PT Nuri Vira Pratama yang di-hosting di GitHub Pages
  * =====================================================================
- *  Dipakai bersama Code.gs (versi baru) di project Apps Script yang sama.
+ *  Dipakai bersama Code.gs di project Apps Script yang sama ("Portal PT Nuri").
  *
  *  - File data di Google Drive tetap sama (NVP_Finance_Data.json).
  *  - File ini hanya berisi doPost; doGet ada di Code.gs.
@@ -10,69 +10,110 @@
  *    TIDAK ada di kode GitHub.
  *  - Sebelum menyimpan, data lama dicadangkan 1x per hari ke folder Drive
  *    "NVP Backup".
- *  - Hak akses: role 'admin' melihat semua data. Role 'staff' TIDAK menerima
- *    data saldo awal, aset tetap, dan transaksi kas (laporan keuangan), dan
- *    tidak bisa mengubahnya — server mempertahankan nilai yang tersimpan.
- *    Akun lama tanpa role: username 'admin' = admin, lainnya = staff.
  *
- *  Langkah:
- *   1. Ubah password di setupNvpUsers() lalu jalankan fungsi itu SEKALI (Run).
- *   2. Hapus lagi password dari kode setelah berhasil (opsional, disarankan).
- *   3. Deploy > New deployment > Web app
- *        Execute as     : Me
- *        Who has access : Anyone
- *      Salin URL yang berakhiran /exec ke config.js (API_URL).
- *   4. Setiap mengubah file ini: Deploy > Manage deployments > Edit > Version: New version.
+ *  AKUN & HAK AKSES
+ *  - Admin mengelola akun dari portal: menu "Pengguna" (tambah akun, atur menu
+ *    yang boleh dibuka, reset password, hapus akun).
+ *  - Role 'admin' : semua menu + kelola pengguna + backup/pulihkan.
+ *  - Role 'staff' : hanya menu yang dicentang admin. Server hanya mengirim data
+ *    yang dibutuhkan menu tersebut, dan hanya menerima perubahan pada data yang
+ *    boleh diubah — data lain dipertahankan apa adanya.
+ *
+ *  LUPA PASSWORD ADMIN?
+ *   Isi password di setupNvpUsers() lalu Run sekali. Akun lain (dan menu yang
+ *   sudah diatur) tidak berubah. Setelah itu kembalikan teks GANTI-PASSWORD-...
+ *
+ *  Setiap mengubah file ini: Terapkan > Kelola deployment > (pilih deployment
+ *  yang URL-nya ada di config.js) > Edit > Versi: Versi baru > Terapkan.
  */
 
 var NVP_TIMEZONE = 'Asia/Jakarta';
 var NVP_BACKUP_FOLDER = 'NVP Backup';
-var NVP_ADMIN_ONLY_KEYS = ['ledger', 'assets', 'cashTx'];
 
-/** Jalankan SEKALI untuk mengatur akun portal. Ganti password sebelum Run. */
+// ---- Daftar menu & data yang dipakai tiap menu (harus sama dengan index.html)
+var NVP_MENUS = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran', 'labarugi', 'neraca', 'pajak', 'datakeu'];
+var NVP_STAFF_DEFAULT = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran'];
+var NVP_DATA_KEYS = ['penawaran', 'invoices', 'expenses', 'suratJalan', 'kwitansi', 'assets', 'cashTx', 'ledger'];
+var NVP_LAPORAN_READ = ['invoices', 'expenses', 'assets', 'cashTx', 'ledger'];
+var NVP_MENU_DATA = {
+  kalender:    { read: ['invoices'],                           write: [] },
+  penawaran:   { read: ['penawaran'],                          write: ['penawaran'] },
+  invoice:     { read: ['invoices', 'suratJalan', 'kwitansi'], write: ['invoices', 'suratJalan', 'kwitansi'] }, // SJ & kwitansi otomatis
+  suratjalan:  { read: ['suratJalan'],                         write: ['suratJalan'] },
+  kwitansi:    { read: ['kwitansi'],                           write: ['kwitansi'] },
+  pengeluaran: { read: ['expenses'],                           write: ['expenses'] },
+  labarugi:    { read: NVP_LAPORAN_READ,                       write: [] },
+  neraca:      { read: NVP_LAPORAN_READ,                       write: [] },
+  pajak:       { read: NVP_LAPORAN_READ,                       write: [] },
+  datakeu:     { read: NVP_LAPORAN_READ,                       write: ['ledger', 'assets', 'cashTx', 'invoices'] }
+};
+
+/**
+ * Darurat / pertama kali: isi password lalu Run SEKALI.
+ * Hanya akun yang password-nya diisi yang diperbarui; akun lain tetap.
+ */
 function setupNvpUsers() {
   var users = [
-    { username: 'admin', password: 'GANTI-PASSWORD-ADMIN', name: 'Administrator', initial: 'A', role: 'admin' },
-    { username: 'staff', password: 'GANTI-PASSWORD-STAFF', name: 'Staff Finance', initial: 'S', role: 'staff' }
+    { username: 'admin', password: 'GANTI-PASSWORD-ADMIN', name: 'Administrator', role: 'admin' },
+    { username: 'staff', password: 'GANTI-PASSWORD-STAFF', name: 'Staff Finance', role: 'staff' }
   ];
-  var stored = users.map(function (u) {
-    if (!u.password || u.password.indexOf('GANTI-') === 0) {
-      throw new Error('Ganti password untuk "' + u.username + '" terlebih dahulu.');
-    }
-    return { username: u.username, hash: nvpHash_(u.password), name: u.name, initial: u.initial, role: u.role === 'admin' ? 'admin' : 'staff' };
+  var list = nvpLoadUsers_(true);
+  var changed = [];
+  users.forEach(function (u) {
+    if (!u.password || u.password.indexOf('GANTI-') === 0) return; // dilewati
+    nvpCheckPassword_(u.password);
+    var i = nvpFindUser_(list, u.username);
+    var rec = i >= 0 ? list[i] : { username: u.username, menus: u.role === 'admin' ? [] : NVP_STAFF_DEFAULT.slice() };
+    rec.hash = nvpHash_(u.password);
+    rec.name = rec.name || u.name;
+    rec.initial = String(rec.name || u.username).charAt(0).toUpperCase();
+    rec.role = u.role === 'admin' ? 'admin' : (rec.role || 'staff');
+    if (i >= 0) list[i] = rec; else list.push(rec);
+    changed.push(u.username);
   });
-  PropertiesService.getScriptProperties().setProperty('NVP_USERS', JSON.stringify(stored));
-  Logger.log('Akun portal tersimpan: ' + stored.map(function (u) { return u.username; }).join(', '));
+  if (!changed.length) throw new Error('Ganti minimal satu password GANTI-PASSWORD-... terlebih dahulu.');
+  nvpSaveUsers_(list);
+  Logger.log('Akun portal tersimpan: ' + changed.join(', '));
 }
 
-/** Endpoint API. Body (text/plain JSON): { action: 'load'|'save', username, password, data? } */
+/** Endpoint API. Body (text/plain JSON): { action, username, password, ... } */
 function doPost(e) {
   var out;
   try {
     var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     var user = nvpAuth_(body.username, body.password);
     if (!user) return nvpJson_({ ok: false, error: 'AUTH' });
+    var access = nvpAccess_(user);
 
     if (body.action === 'load') {
-      // loadDataFromDrive_() mengembalikan string JSON (atau null jika belum ada data)
       var raw = loadDataFromDrive_() || null;
-      out = { ok: true, user: user, data: user.role === 'admin' ? raw : nvpStripAdminOnly_(raw) };
+      out = { ok: true, user: user, data: user.role === 'admin' ? raw : nvpFilterRead_(raw, access.read) };
 
     } else if (body.action === 'save') {
-      if (!body.data || typeof body.data !== 'object') {
-        return nvpJson_({ ok: false, error: 'DATA_TIDAK_VALID' });
-      }
-      var lock = LockService.getScriptLock();
-      lock.waitLock(20000);
-      try {
+      if (!body.data || typeof body.data !== 'object') return nvpJson_({ ok: false, error: 'DATA_TIDAK_VALID' });
+      nvpWithLock_(function () {
         var data = body.data;
-        if (user.role !== 'admin') data = nvpKeepAdminOnly_(data, loadDataFromDrive_());
+        if (user.role !== 'admin') data = nvpMergeWrite_(data, loadDataFromDrive_(), access.write);
         nvpDailyBackup_();
         saveDataToDrive_(JSON.stringify(data));
-      } finally {
-        lock.releaseLock();
-      }
+      });
       out = { ok: true, savedAt: new Date().toISOString() };
+
+    } else if (body.action === 'changePassword') {
+      nvpCheckPassword_(body.newPassword);
+      nvpWithLock_(function () {
+        var list = nvpLoadUsers_();
+        var i = nvpFindUser_(list, user.username);
+        list[i].hash = nvpHash_(body.newPassword);
+        nvpSaveUsers_(list);
+      });
+      out = { ok: true };
+
+    } else if (body.action === 'listUsers' || body.action === 'saveUser' || body.action === 'deleteUser') {
+      if (user.role !== 'admin') return nvpJson_({ ok: false, error: 'TIDAK_DIIZINKAN' });
+      if (body.action === 'saveUser') nvpWithLock_(function () { nvpSaveUserAction_(body.user, !!body.isNew, user.username); });
+      if (body.action === 'deleteUser') nvpWithLock_(function () { nvpDeleteUserAction_(body.target, user.username); });
+      out = { ok: true, users: nvpLoadUsers_().map(nvpPublicUser_) };
 
     } else {
       out = { ok: false, error: 'ACTION_TIDAK_DIKENAL' };
@@ -84,43 +125,124 @@ function doPost(e) {
 }
 
 // ---------------------------------------------------------------------
-// Helper
+// Pengguna
 // ---------------------------------------------------------------------
+function nvpLoadUsers_(allowEmpty) {
+  var raw = PropertiesService.getScriptProperties().getProperty('NVP_USERS');
+  if (!raw) {
+    if (allowEmpty) return [];
+    throw new Error('Akun belum diatur. Jalankan setupNvpUsers() di Apps Script.');
+  }
+  return JSON.parse(raw);
+}
+function nvpSaveUsers_(list) {
+  PropertiesService.getScriptProperties().setProperty('NVP_USERS', JSON.stringify(list));
+}
+function nvpFindUser_(list, username) {
+  for (var i = 0; i < list.length; i++) if (list[i].username === String(username)) return i;
+  return -1;
+}
+function nvpRole_(u) { return u.role || (u.username === 'admin' ? 'admin' : 'staff'); }
+function nvpMenus_(u) {
+  if (nvpRole_(u) === 'admin') return NVP_MENUS.slice();
+  var m = Array.isArray(u.menus) ? u.menus : NVP_STAFF_DEFAULT;
+  return NVP_MENUS.filter(function (k) { return m.indexOf(k) >= 0; });
+}
+function nvpPublicUser_(u) {
+  return { username: u.username, name: u.name, initial: u.initial, role: nvpRole_(u), menus: nvpMenus_(u) };
+}
+function nvpCheckPassword_(p) {
+  if (typeof p !== 'string' || p.length < 8) throw new Error('Password minimal 8 karakter.');
+}
+
+function nvpSaveUserAction_(u, isNew, actor) {
+  if (!u || typeof u !== 'object') throw new Error('Data akun tidak valid.');
+  var username = String(u.username || '').trim().toLowerCase();
+  if (!/^[a-z0-9._-]{3,30}$/.test(username)) throw new Error('Username 3–30 karakter: huruf kecil, angka, titik, - atau _.');
+  var name = String(u.name || '').trim().slice(0, 60);
+  if (!name) throw new Error('Nama wajib diisi.');
+  var role = u.role === 'admin' ? 'admin' : 'staff';
+  var menus = NVP_MENUS.filter(function (k) { return Array.isArray(u.menus) && u.menus.indexOf(k) >= 0; });
+
+  var list = nvpLoadUsers_();
+  var i = nvpFindUser_(list, username);
+  if (isNew && i >= 0) throw new Error('Username "' + username + '" sudah dipakai.');
+  if (!isNew && i < 0) throw new Error('Akun tidak ditemukan.');
+  if (isNew || u.password) nvpCheckPassword_(u.password);
+  if (!isNew && username === actor && role !== 'admin') throw new Error('Anda tidak bisa menurunkan peran akun Anda sendiri.');
+
+  var rec = i >= 0 ? list[i] : { username: username };
+  rec.name = name;
+  rec.initial = name.charAt(0).toUpperCase();
+  rec.role = role;
+  rec.menus = role === 'admin' ? [] : menus;
+  if (u.password) rec.hash = nvpHash_(u.password);
+  if (i >= 0) list[i] = rec; else list.push(rec);
+  if (!list.some(function (x) { return nvpRole_(x) === 'admin'; })) throw new Error('Minimal harus ada satu admin.');
+  nvpSaveUsers_(list);
+}
+
+function nvpDeleteUserAction_(target, actor) {
+  var list = nvpLoadUsers_();
+  var i = nvpFindUser_(list, target);
+  if (i < 0) throw new Error('Akun tidak ditemukan.');
+  if (list[i].username === actor) throw new Error('Anda tidak bisa menghapus akun Anda sendiri.');
+  list.splice(i, 1);
+  if (!list.some(function (x) { return nvpRole_(x) === 'admin'; })) throw new Error('Minimal harus ada satu admin.');
+  nvpSaveUsers_(list);
+}
+
 function nvpAuth_(username, password) {
   if (!username || !password) return null;
-  var raw = PropertiesService.getScriptProperties().getProperty('NVP_USERS');
-  if (!raw) throw new Error('Akun belum diatur. Jalankan setupNvpUsers() di Apps Script.');
-  var users = JSON.parse(raw);
+  var users = nvpLoadUsers_();
   var hash = nvpHash_(password);
   for (var i = 0; i < users.length; i++) {
-    if (users[i].username === String(username) && users[i].hash === hash) {
-      var role = users[i].role || (users[i].username === 'admin' ? 'admin' : 'staff');
-      return { username: users[i].username, name: users[i].name, initial: users[i].initial, role: role };
-    }
+    if (users[i].username === String(username) && users[i].hash === hash) return nvpPublicUser_(users[i]);
   }
   Utilities.sleep(1000); // perlambat percobaan tebak password
   return null;
 }
 
-/** Staff: buang data khusus admin dari data yang dikirim ke browser. */
-function nvpStripAdminOnly_(raw) {
+// ---------------------------------------------------------------------
+// Hak akses data
+// ---------------------------------------------------------------------
+function nvpAccess_(user) {
+  if (user.role === 'admin') return { read: NVP_DATA_KEYS.slice(), write: NVP_DATA_KEYS.slice() };
+  var read = {}, write = {};
+  user.menus.forEach(function (m) {
+    var d = NVP_MENU_DATA[m]; if (!d) return;
+    d.read.forEach(function (k) { read[k] = true; });
+    d.write.forEach(function (k) { write[k] = true; read[k] = true; });
+  });
+  return { read: Object.keys(read), write: Object.keys(write) };
+}
+
+/** Kirim ke browser hanya data yang boleh dibaca. */
+function nvpFilterRead_(raw, readKeys) {
   if (!raw) return raw;
   var d;
   try { d = JSON.parse(raw); } catch (e) { return raw; }
-  NVP_ADMIN_ONLY_KEYS.forEach(function (k) { delete d[k]; });
+  NVP_DATA_KEYS.forEach(function (k) { if (readKeys.indexOf(k) < 0) delete d[k]; });
   return JSON.stringify(d);
 }
 
-/** Staff menyimpan: pertahankan data khusus admin yang sudah ada di Drive. */
-function nvpKeepAdminOnly_(incoming, currentRaw) {
+/** Terima perubahan hanya pada data yang boleh diubah; sisanya tetap dari Drive. */
+function nvpMergeWrite_(incoming, currentRaw, writeKeys) {
   var cur = {};
   try { cur = currentRaw ? JSON.parse(currentRaw) : {}; } catch (e) { throw new Error('Data di Drive tidak dapat dibaca; penyimpanan dibatalkan.'); }
   var out = {};
-  Object.keys(incoming).forEach(function (k) { out[k] = incoming[k]; });
-  NVP_ADMIN_ONLY_KEYS.forEach(function (k) {
-    if (cur[k] !== undefined) out[k] = cur[k]; else delete out[k];
-  });
+  Object.keys(cur).forEach(function (k) { out[k] = cur[k]; });
+  writeKeys.forEach(function (k) { if (incoming[k] !== undefined) out[k] = incoming[k]; });
   return out;
+}
+
+// ---------------------------------------------------------------------
+// Helper
+// ---------------------------------------------------------------------
+function nvpWithLock_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try { return fn(); } finally { lock.releaseLock(); }
 }
 
 function nvpHash_(text) {
