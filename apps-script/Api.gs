@@ -10,6 +10,10 @@
  *    TIDAK ada di kode GitHub.
  *  - Sebelum menyimpan, data lama dicadangkan 1x per hari ke folder Drive
  *    "NVP Backup".
+ *  - Hak akses: role 'admin' melihat semua data. Role 'staff' TIDAK menerima
+ *    data saldo awal, aset tetap, dan transaksi kas (laporan keuangan), dan
+ *    tidak bisa mengubahnya — server mempertahankan nilai yang tersimpan.
+ *    Akun lama tanpa role: username 'admin' = admin, lainnya = staff.
  *
  *  Langkah:
  *   1. Ubah password di setupNvpUsers() lalu jalankan fungsi itu SEKALI (Run).
@@ -23,18 +27,19 @@
 
 var NVP_TIMEZONE = 'Asia/Jakarta';
 var NVP_BACKUP_FOLDER = 'NVP Backup';
+var NVP_ADMIN_ONLY_KEYS = ['ledger', 'assets', 'cashTx'];
 
 /** Jalankan SEKALI untuk mengatur akun portal. Ganti password sebelum Run. */
 function setupNvpUsers() {
   var users = [
-    { username: 'admin', password: 'GANTI-PASSWORD-ADMIN', name: 'Administrator', initial: 'A' },
-    { username: 'staff', password: 'GANTI-PASSWORD-STAFF', name: 'Staff Finance', initial: 'S' }
+    { username: 'admin', password: 'GANTI-PASSWORD-ADMIN', name: 'Administrator', initial: 'A', role: 'admin' },
+    { username: 'staff', password: 'GANTI-PASSWORD-STAFF', name: 'Staff Finance', initial: 'S', role: 'staff' }
   ];
   var stored = users.map(function (u) {
     if (!u.password || u.password.indexOf('GANTI-') === 0) {
       throw new Error('Ganti password untuk "' + u.username + '" terlebih dahulu.');
     }
-    return { username: u.username, hash: nvpHash_(u.password), name: u.name, initial: u.initial };
+    return { username: u.username, hash: nvpHash_(u.password), name: u.name, initial: u.initial, role: u.role === 'admin' ? 'admin' : 'staff' };
   });
   PropertiesService.getScriptProperties().setProperty('NVP_USERS', JSON.stringify(stored));
   Logger.log('Akun portal tersimpan: ' + stored.map(function (u) { return u.username; }).join(', '));
@@ -50,7 +55,8 @@ function doPost(e) {
 
     if (body.action === 'load') {
       // loadDataFromDrive_() mengembalikan string JSON (atau null jika belum ada data)
-      out = { ok: true, user: user, data: loadDataFromDrive_() || null };
+      var raw = loadDataFromDrive_() || null;
+      out = { ok: true, user: user, data: user.role === 'admin' ? raw : nvpStripAdminOnly_(raw) };
 
     } else if (body.action === 'save') {
       if (!body.data || typeof body.data !== 'object') {
@@ -59,8 +65,10 @@ function doPost(e) {
       var lock = LockService.getScriptLock();
       lock.waitLock(20000);
       try {
+        var data = body.data;
+        if (user.role !== 'admin') data = nvpKeepAdminOnly_(data, loadDataFromDrive_());
         nvpDailyBackup_();
-        saveDataToDrive_(JSON.stringify(body.data));
+        saveDataToDrive_(JSON.stringify(data));
       } finally {
         lock.releaseLock();
       }
@@ -86,11 +94,33 @@ function nvpAuth_(username, password) {
   var hash = nvpHash_(password);
   for (var i = 0; i < users.length; i++) {
     if (users[i].username === String(username) && users[i].hash === hash) {
-      return { username: users[i].username, name: users[i].name, initial: users[i].initial };
+      var role = users[i].role || (users[i].username === 'admin' ? 'admin' : 'staff');
+      return { username: users[i].username, name: users[i].name, initial: users[i].initial, role: role };
     }
   }
   Utilities.sleep(1000); // perlambat percobaan tebak password
   return null;
+}
+
+/** Staff: buang data khusus admin dari data yang dikirim ke browser. */
+function nvpStripAdminOnly_(raw) {
+  if (!raw) return raw;
+  var d;
+  try { d = JSON.parse(raw); } catch (e) { return raw; }
+  NVP_ADMIN_ONLY_KEYS.forEach(function (k) { delete d[k]; });
+  return JSON.stringify(d);
+}
+
+/** Staff menyimpan: pertahankan data khusus admin yang sudah ada di Drive. */
+function nvpKeepAdminOnly_(incoming, currentRaw) {
+  var cur = {};
+  try { cur = currentRaw ? JSON.parse(currentRaw) : {}; } catch (e) { throw new Error('Data di Drive tidak dapat dibaca; penyimpanan dibatalkan.'); }
+  var out = {};
+  Object.keys(incoming).forEach(function (k) { out[k] = incoming[k]; });
+  NVP_ADMIN_ONLY_KEYS.forEach(function (k) {
+    if (cur[k] !== undefined) out[k] = cur[k]; else delete out[k];
+  });
+  return out;
 }
 
 function nvpHash_(text) {

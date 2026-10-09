@@ -256,6 +256,41 @@
       return nextDocNumber((list || []).filter(d => d && d.id !== oldId), base, hasPpn, item);
     }
     const sortByDateDesc = (arr) => [...arr].sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')));
+
+    // Surat jalan & kwitansi otomatis dari invoice (terhubung lewat field invoiceId)
+    const sjItemsFromInvoice = (inv) => (inv.items || []).filter(it => String((it && it.desc) || '').trim()).map(it => ({ desc: it.desc, qty: Number(it.qty) || 0 }));
+    const sjFromInvoice = (inv) => ({ date: inv.date, customer: inv.customer, driver: '', vehicle: '', items: sjItemsFromInvoice(inv), signerName: '', signerRole: 'Warehouse Dept.', invoiceId: inv.id });
+    const kwtFromInvoice = (inv) => {
+      const barang = (inv.items || []).map(it => it && it.desc).filter(Boolean).join(', ');
+      return { date: inv.paidDate && inv.paidDate > inv.date ? inv.paidDate : inv.date, receivedFrom: inv.customer, amount: Math.round(Number(inv.total) || 0),
+        purpose: `Pelunasan Invoice No. ${inv.id}${barang ? ' — ' + barang : ''}`, signerName: inv.signerName || '', signerRole: 'Finance Dept.', invoiceId: inv.id };
+    };
+    // opts.createSJ / opts.createKwt: buat dokumen bila belum ada. Dokumen yang sudah terhubung selalu diselaraskan.
+    function syncInvoiceDocs(inv, oldInvId, sjList, kwtList, opts) {
+      const o = opts || {};
+      const linkId = oldInvId || inv.id;
+      let sj = [...(sjList || [])], kw = [...(kwtList || [])];
+      let changedSJ = false, changedKW = false;
+      const si = sj.findIndex(d => d && d.invoiceId === linkId);
+      if (si >= 0) {
+        sj[si] = { ...sj[si], invoiceId: inv.id, customer: inv.customer, items: sjItemsFromInvoice(inv) }; changedSJ = true;
+      } else if (o.createSJ) {
+        const d = sjFromInvoice(inv); sj.push({ ...d, id: nextDocNumber(sj, 'SJ', false, d) }); changedSJ = true;
+      }
+      const ki = kw.findIndex(d => d && d.invoiceId === linkId);
+      if (inv.paidDate) {
+        const d = kwtFromInvoice(inv);
+        if (ki >= 0) {
+          const k = kw[ki];
+          kw[ki] = { ...k, ...d, signerName: k.signerName || d.signerName, signerRole: k.signerRole || d.signerRole, id: keepOrRenumber(kw, 'KWT', false, k.id, d) }; changedKW = true;
+        } else if (o.createKwt) {
+          kw.push({ ...d, id: nextDocNumber(kw, 'KWT', false, d) }); changedKW = true;
+        }
+      } else if (ki >= 0) {
+        kw.splice(ki, 1); changedKW = true;   // invoice batal lunas -> kwitansinya dicabut
+      }
+      return { sj: changedSJ ? sortByDateDesc(sj) : sjList, kw: changedKW ? sortByDateDesc(kw) : kwtList, changedSJ, changedKW };
+    }
     const pad2 = (n) => String(n).padStart(2, '0');
     const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
     const paren = (v) => `(${formatIDR(Math.abs(v || 0))})`;
@@ -298,6 +333,18 @@
       terima_piutang_awal: { label: 'Pelunasan piutang saldo awal',       arah: 1 },
       bayar_utang_awal:    { label: 'Pembayaran utang saldo awal',        arah: -1 },
     };
+
+    // Jenis biaya per kategori — memudahkan penelitian beban (rincian di laba rugi & rekap pengeluaran)
+    const JENIS_BIAYA = {
+      Operasional: ['Gaji & upah karyawan', 'Sewa tempat', 'Listrik, air & internet', 'Telepon & pulsa', 'Transportasi & BBM', 'Pengiriman / ekspedisi', 'ATK & perlengkapan kantor', 'Perawatan & perbaikan', 'Pemasaran & iklan', 'Konsumsi & jamuan', 'Perizinan & sertifikasi usaha', 'Biaya bank & administrasi', 'Pajak & retribusi daerah (bukan PPh)', 'Asuransi', 'Lain-lain'],
+      HPP: ['Pembelian tabung APAR', 'Pembelian media pemadam (powder/CO2/foam)', 'Sparepart & aksesoris', 'Jasa uji / sertifikasi pihak ketiga', 'Ongkos angkut pembelian', 'Lain-lain'],
+    };
+    const JENIS_KOSONG = 'Belum dikategorikan';
+    function rekapJenis(list) {
+      const m = {};
+      (list || []).forEach(e => { const k = (e && e.jenis) || JENIS_KOSONG; m[k] = (m[k] || 0) + num(e && e.amount); });
+      return Object.entries(m).sort((a, b) => b[1] - a[1]);
+    }
 
     const LEDGER_DEFAULT = {
       opening: { kas: 0, piutang: 0, persediaan: 0, asetTetap: 0, akumPenyusutan: 0, utangUsaha: 0, utangPajak: 0, pinjaman: 0, modal: 0 },
@@ -382,6 +429,8 @@
         const penjualanNonPPN = inv.filter(i => !i.usePpn).reduce((s, i) => s + num(i.subtotal), 0);
         const pendapatanUsaha = penjualanPPN + penjualanNonPPN;
         const pembelian = exp.filter(e => e.category === 'HPP').reduce((s, e) => s + num(e.amount), 0);
+        const pembelianPerJenis = rekapJenis(exp.filter(e => e.category === 'HPP'));
+        const bebanPerJenis = rekapJenis(exp.filter(e => e.category !== 'HPP'));
         const pAwal = persAwal(y), pAkhir = persAkhir(y);
         const hpp = pAwal + pembelian - pAkhir;
         const labaKotor = pendapatanUsaha - hpp;
@@ -401,7 +450,7 @@
         const pph = hitungPPhBadan(pkp, peredaranBruto, L.pphScheme, pendapatanUsaha);
         const labaBersih = labaSebelumPajak - pph.pph;
 
-        return { year: y, penjualanPPN, penjualanNonPPN, pendapatanUsaha, persAwal: pAwal, pembelian, persAkhir: pAkhir, persAkhirDiisi: L.closingInventory[String(y)] !== undefined, hpp, labaKotor, bebanOperasional, penyusutan, labaUsaha, pendapatanLain, bungaBank, labaSebelumPajak, koreksiPositif, koreksiNegatif, penghasilanNetoFiskal, pkp, peredaranBruto, pph, bebanPajak: pph.pph, labaBersih };
+        return { year: y, penjualanPPN, penjualanNonPPN, pendapatanUsaha, persAwal: pAwal, pembelian, persAkhir: pAkhir, persAkhirDiisi: L.closingInventory[String(y)] !== undefined, pembelianPerJenis, bebanPerJenis, hpp, labaKotor, bebanOperasional, penyusutan, labaUsaha, pendapatanLain, bungaBank, labaSebelumPajak, koreksiPositif, koreksiNegatif, penghasilanNetoFiskal, pkp, peredaranBruto, pph, bebanPajak: pph.pph, labaBersih };
       }
 
       const lr = labaRugi(Y);
@@ -1162,7 +1211,7 @@
       const [cashTx, setCashTx] = useState([]);
       const [ledger, setLedger] = useState(() => normalizeLedger(null));
       const [lapYear, setLapYear] = useState(String(new Date().getFullYear()));
-      const [lapTab, setLapTab] = useState('labarugi');
+      const [expFilter, setExpFilter] = useState({ year: 'all', category: 'all', jenis: 'all' });
       const [formError, setFormError] = useState('');
       const emptyAssetForm = { date: '', name: '', cost: '', kelompok: 'k1' };
       const emptyCashForm = { date: '', type: 'modal', amount: '', desc: '' };
@@ -1179,7 +1228,7 @@
       const defaultPnwNotes = "1. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya jika masa berlaku telah habis.\n2. Sistem pembayaran dan termin waktu dapat didiskusikan lebih lanjut.";
       const emptyPenawaranForm = { date: '', validUntil: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Marketing Dept.', notes: defaultPnwNotes };
       const emptyInvoiceForm = { date: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
-      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', paidDate: '', nonDeductible: false };
+      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', paidDate: '', nonDeductible: false };
       const emptySjForm = { date: '', customer: '', driver: '', vehicle: '', items: [], signerName: '', signerRole: 'Warehouse Dept.' };
       const emptyKwitansiForm = { date: '', receivedFrom: '', amount: 0, purpose: '', signerName: '', signerRole: 'Finance Dept.' };
 
@@ -1348,8 +1397,9 @@
         if (!element) return;
 
         setIsGeneratingPDF(true);
+        const namaLap = { labarugi: 'Laba_Rugi', neraca: 'Neraca', pajak: 'Perhitungan_Pajak' }[printData.part] || 'Laporan_Keuangan';
         const fileName = printData.type === 'lapkeu'
-            ? `Laporan_Keuangan_${printData.item?.year || ''}_PT_Nuri_Vira_Pratama.pdf`
+            ? `${namaLap}_${printData.item?.year || ''}_PT_Nuri_Vira_Pratama.pdf`
             : (printData.item && !Array.isArray(printData.item) && printData.item.id)
               ? `${String(printData.item.id).replace(/\//g, '-')}.pdf`
               : `Dokumen_${printData.type}_Kolektif.pdf`;
@@ -1385,9 +1435,12 @@
 
       // --- LOGIC FUNCTIONS ---
       const validUsers = [
-        { username: 'admin', password: 'admin123', name: 'Administrator', initial: 'A' },
-        { username: 'staff', password: 'staff123', name: 'Staff Finance', initial: 'S' }
+        { username: 'admin', password: 'admin123', name: 'Administrator', initial: 'A', role: 'admin' },
+        { username: 'staff', password: 'staff123', name: 'Staff Finance', initial: 'S', role: 'staff' }
       ];
+      // Admin: semua menu. Staff: dokumen & pengeluaran saja (laporan keuangan, saldo awal, backup/pulihkan tertutup).
+      const isAdmin = !!currentUser && (currentUser.role ? currentUser.role === 'admin' : currentUser.username === 'admin');
+      const MENU_LAPORAN = ['labarugi', 'neraca', 'pajak', 'datakeu'];
 
       const loginViaApi = async () => {
         setIsLoggingIn(true); setLoginError('');
@@ -1409,7 +1462,9 @@
           saveAllowedRef.current = true;
           setLoadError(''); setSyncError('');
           const u = r.user || {};
-          setCurrentUser({ username: u.username || creds.username, name: u.name || creds.username, initial: u.initial || (creds.username[0] || '?').toUpperCase() });
+          const uname = u.username || creds.username;
+          setCurrentUser({ username: uname, name: u.name || uname, initial: u.initial || (uname[0] || '?').toUpperCase(), role: u.role || (uname === 'admin' ? 'admin' : 'staff') });
+          setActiveTab('dashboard');
           setIsLoggedIn(true);
         } catch (err) {
           setLoginError('Tidak dapat terhubung ke server data. Periksa koneksi internet dan API_URL di config.js.');
@@ -1424,7 +1479,7 @@
         const user = validUsers.find(
           u => u.username === loginFormState.username && u.password === loginFormState.password
         );
-        if (user) { setIsLoggedIn(true); setCurrentUser(user); setLoginError(''); }
+        if (user) { setIsLoggedIn(true); setCurrentUser(user); setLoginError(''); setActiveTab('dashboard'); }
         else { setLoginError('Username atau password salah!'); }
       };
 
@@ -1443,6 +1498,7 @@
           setAssets([]); setCashTx([]); setLedger(normalizeLedger(null));
           setActiveTab('dashboard');
         }
+        setActiveTab('dashboard');
         setIsLoggedIn(false); setCurrentUser(null); setLoginFormState({ username: '', password: '' });
       };
 
@@ -1451,7 +1507,11 @@
         const { type, id } = deleteConfirm;
         // Nomor dokumen lain TIDAK digeser — nomor yang dihapus menjadi celah (jejak audit tetap utuh)
         if (type === 'penawaran') setPenawaran((penawaran||[]).filter(i => i?.id !== id));
-        else if (type === 'invoice') setInvoices((invoices||[]).filter(i => i?.id !== id));
+        else if (type === 'invoice') {
+          setInvoices((invoices||[]).filter(i => i?.id !== id));
+          if ((suratJalan||[]).some(d => d?.invoiceId === id)) setSuratJalan((suratJalan||[]).filter(d => d?.invoiceId !== id));
+          if ((kwitansi||[]).some(d => d?.invoiceId === id)) setKwitansi((kwitansi||[]).filter(d => d?.invoiceId !== id));
+        }
         else if (type === 'sj') setSuratJalan((suratJalan||[]).filter(i => i?.id !== id));
         else if (type === 'kwitansi') setKwitansi((kwitansi||[]).filter(i => i?.id !== id));
         else if (type === 'expense') setExpenses((expenses||[]).filter(i => i?.id !== id));
@@ -1509,13 +1569,28 @@
         if (invoiceForm.paidDate && invoiceForm.paidDate < invoiceForm.date) { setFormError('Tanggal pelunasan tidak boleh sebelum tanggal invoice.'); return; }
         const completeItem = { ...invoiceForm, items: (invoiceForm.items||[]).filter(it => String(it?.desc || '').trim()), ...hitungNilaiDokumen(invoiceForm) };
         const id = editingId ? keepOrRenumber(invoices, 'INV', true, editingId, completeItem) : nextDocNumber(invoices, 'INV', true, completeItem);
-        const newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? { ...completeItem, id } : i) : [...(invoices||[]), { ...completeItem, id }];
+        const inv = editingId ? { ...completeItem, id } : { ...completeItem, id, autoDocs: true };
+        const newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? inv : i) : [...(invoices||[]), inv];
         setInvoices(sortByDateDesc(newArray));
+        // Invoice baru: surat jalan dibuat otomatis; kwitansi dibuat saat invoice lunas.
+        const r = syncInvoiceDocs(inv, editingId, suratJalan, kwitansi, { createSJ: !editingId, createKwt: !!inv.autoDocs });
+        if (r.changedSJ) setSuratJalan(r.sj);
+        if (r.changedKW) setKwitansi(r.kw);
         setInvoiceModalOpen(false);
+      };
+      // Buat surat jalan / kwitansi untuk invoice yang belum punya (mis. invoice lama)
+      const buatDokumenDariInvoice = (inv, jenis) => {
+        const r = syncInvoiceDocs(inv, null, suratJalan, kwitansi, { createSJ: jenis === 'sj', createKwt: jenis === 'kwt' });
+        if (r.changedSJ) setSuratJalan(r.sj);
+        if (r.changedKW) setKwitansi(r.kw);
       };
 
       const markInvoicePaid = (inv, date) => {
-        setInvoices((invoices||[]).map(i => i?.id === inv.id ? { ...i, paidDate: date ? maxDate(i.date, date) : '' } : i));
+        const upd = { ...inv, paidDate: date ? maxDate(inv.date, date) : '' };
+        setInvoices((invoices||[]).map(i => i?.id === inv.id ? upd : i));
+        const r = syncInvoiceDocs(upd, inv.id, suratJalan, kwitansi, { createKwt: !!upd.autoDocs });
+        if (r.changedSJ) setSuratJalan(r.sj);
+        if (r.changedKW) setKwitansi(r.kw);
       };
       const bulkMarkPaid = (until) => {
         if (!until) return;
@@ -1544,6 +1619,7 @@
         if (!expenseForm.date) { setFormError('Tanggal wajib diisi.'); return; }
         if (!String(expenseForm.desc || '').trim()) { setFormError('Deskripsi beban wajib diisi.'); return; }
         if (!(num(expenseForm.amount) > 0)) { setFormError('Nominal harus lebih dari 0.'); return; }
+        if (!(JENIS_BIAYA[expenseForm.category === 'HPP' ? 'HPP' : 'Operasional'] || []).includes(expenseForm.jenis)) { setFormError('Pilih jenis biaya.'); return; }
         if (num(expenseForm.ppnMasukan) < 0) { setFormError('PPN masukan tidak boleh negatif.'); return; }
         const isUtang = expenseForm.paymentStatus === 'utang';
         if (isUtang && expenseForm.paidDate && expenseForm.paidDate < expenseForm.date) { setFormError('Tanggal pelunasan tidak boleh sebelum tanggal beban.'); return; }
@@ -1709,9 +1785,11 @@
         const { type, item } = printData;
         if (type === 'lapkeu') {
           const R = item, lr = R.lr, A = R.aset, Lb = R.liabilitas, E = R.ekuitas;
+          const part = printData.part || 'semua';
+          const tampil = (p) => part === 'semua' || part === p;
           const row = (label, value, o = {}) => (
-            <tr key={label} className={`${o.total ? 'font-bold border-t border-slate-400' : ''} ${o.grand ? 'font-black border-t-2 border-slate-900 bg-slate-50' : ''}`}>
-              <td className={`py-1 ${o.indent ? 'pl-4' : 'pl-1'}`}>{label}</td>
+            <tr key={o.key || label} className={`${o.total ? 'font-bold border-t border-slate-400' : ''} ${o.grand ? 'font-black border-t-2 border-slate-900 bg-slate-50' : ''} ${o.sub ? 'text-slate-500 text-[10px]' : ''}`}>
+              <td className={`py-1 ${o.sub ? 'pl-8' : o.indent ? 'pl-4' : 'pl-1'}`}>{o.sub ? '· ' : ''}{label}</td>
               <td className="py-1 pr-1 text-right whitespace-nowrap">{o.neg ? paren(value) : formatIDR(value)}</td>
             </tr>
           );
@@ -1748,7 +1826,7 @@
                 </div>
               </div>
               <div id="print-container" className="bg-transparent">
-                <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                {tampil('labarugi') && <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
                   {kop('LAPORAN LABA RUGI')}
                   <p className="text-center font-bold mb-2">Periode 1 Januari – 31 Desember {R.year}</p>
                   <table className="w-full"><tbody>
@@ -1759,11 +1837,13 @@
                     {head('Harga pokok penjualan')}
                     {row('Persediaan awal', lr.persAwal, { indent: true })}
                     {row('Pembelian', lr.pembelian, { indent: true })}
+                    {lr.pembelianPerJenis.map(([j, v]) => row(j, v, { sub: true, key: 'hpp-' + j }))}
                     {row('Persediaan akhir', lr.persAkhir, { indent: true, neg: true })}
                     {row('Jumlah harga pokok penjualan', lr.hpp, { total: true, neg: true })}
                     {row('Laba kotor', lr.labaKotor, { total: true })}
                     {head('Beban usaha')}
                     {row('Beban operasional', lr.bebanOperasional, { indent: true })}
+                    {lr.bebanPerJenis.map(([j, v]) => row(j, v, { sub: true, key: 'op-' + j }))}
                     {row('Beban penyusutan', lr.penyusutan, { indent: true })}
                     {row('Jumlah beban usaha', lr.bebanOperasional + lr.penyusutan, { total: true, neg: true })}
                     {row('Laba usaha', lr.labaUsaha, { total: true })}
@@ -1775,9 +1855,9 @@
                     {row('LABA BERSIH TAHUN BERJALAN', lr.labaBersih, { grand: true })}
                   </tbody></table>
                   {ttd}
-                </div>
+                </div>}
 
-                <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                {tampil('neraca') && <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
                   {kop('LAPORAN POSISI KEUANGAN')}
                   <p className="text-center font-bold mb-2">Per 31 Desember {R.year}</p>
                   <div className="grid grid-cols-2 gap-6">
@@ -1812,9 +1892,9 @@
                     </tbody></table>
                   </div>
                   {ttd}
-                </div>
+                </div>}
 
-                <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                {tampil('pajak') && <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
                   {kop('PERHITUNGAN PAJAK')}
                   <p className="font-black uppercase tracking-wider text-[10px] mb-1">A. PPN tahun {R.year}</p>
                   <table className="w-full mb-4">
@@ -1837,7 +1917,7 @@
                   </tbody></table>
                   <p className="mt-2 text-[9px] text-slate-500">Metode: {lr.pph.metode}. Estimasi berdasarkan data portal; bukan pengganti SPT resmi.</p>
                   {ttd}
-                </div>
+                </div>}
               </div>
             </div>
           );
@@ -2009,9 +2089,9 @@
       // --- 3. MAIN RENDER TAB SCREENS ---
       // Baris tabel laporan (dipakai dasbor, tab laporan, dan cetak)
       const lrRow = (label, value, o = {}) => (
-        <tr key={label} className={`${o.total ? 'border-t border-slate-300 font-bold text-slate-900' : 'text-slate-700'} ${o.grand ? 'border-t-2 border-slate-900 bg-slate-50' : ''}`}>
-          <td className={`py-2 ${o.indent ? 'pl-5' : 'pl-1'} ${o.grand ? 'font-black py-3' : ''}`}>{label}{o.note && <span className="block text-[11px] text-slate-400 font-medium">{o.note}</span>}</td>
-          <td className={`py-2 pr-1 text-right tabular-nums whitespace-nowrap ${o.neg ? 'text-rose-600' : ''} ${o.grand ? 'font-black py-3 ' + (value >= 0 ? 'text-emerald-700' : 'text-rose-700') : ''}`}>{o.neg ? paren(value) : formatIDR(value)}</td>
+        <tr key={o.key || label} className={`${o.total ? 'border-t border-slate-300 font-bold text-slate-900' : o.sub ? 'text-slate-500' : 'text-slate-700'} ${o.grand ? 'border-t-2 border-slate-900 bg-slate-50' : ''}`}>
+          <td className={`${o.sub ? 'py-1 pl-10 text-xs' : 'py-2'} ${o.sub ? '' : o.indent ? 'pl-5' : 'pl-1'} ${o.grand ? 'font-black py-3' : ''}`}>{o.sub ? '· ' : ''}{label}{o.note && <span className="block text-[11px] text-slate-400 font-medium">{o.note}</span>}</td>
+          <td className={`${o.sub ? 'py-1 text-xs' : 'py-2'} pr-1 text-right tabular-nums whitespace-nowrap ${o.neg ? 'text-rose-600' : ''} ${o.grand ? 'font-black py-3 ' + (value >= 0 ? 'text-emerald-700' : 'text-rose-700') : ''}`}>{o.neg ? paren(value) : formatIDR(value)}</td>
         </tr>
       );
       const lrHead = (label) => (<tr key={'h-' + label}><td colSpan="2" className="pt-5 pb-1 pl-1 text-[11px] font-black uppercase tracking-widest text-slate-500">{label}</td></tr>);
@@ -2021,7 +2101,52 @@
         </select>
       );
 
+      const renderDashboardStaff = () => {
+        const y = currentYearStr;
+        const invTahun = (invoices || []).filter(i => i && (i.date || '').startsWith(y));
+        const belum = (invoices || []).filter(i => i && i.date && !i.paidDate);
+        const sjBulan = (suratJalan || []).filter(d => d && (d.date || '').startsWith(todayStr().slice(0, 7)));
+        const expTahun = (expenses || []).filter(e => e && (e.date || '').startsWith(y));
+        const tanpaSJ = (invoices || []).filter(i => i && i.autoDocs && !(suratJalan || []).some(d => d && d.invoiceId === i.id));
+        const kartu = (judul, nilai, sub, Icon, tone, onClick) => (
+          <button onClick={onClick} className="text-left bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-slate-300">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">{judul}</h3>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tone}`}><Icon size={20} /></div>
+            </div>
+            <div className="mt-5 text-2xl font-extrabold text-slate-800 tabular-nums">{nilai}</div>
+            <p className="text-xs font-medium text-slate-400 mt-2">{sub}</p>
+          </button>
+        );
+        return (
+          <div className="space-y-8">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Ringkasan Operasional</h2>
+              <p className="text-sm text-slate-500 mt-1">Selamat bekerja, {currentUser?.name}. Laporan keuangan hanya dapat dibuka oleh admin.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+              {kartu(`Invoice ${y}`, invTahun.length, 'Dokumen invoice tahun ini', IconFileText, 'bg-blue-50 text-blue-600', () => setActiveTab('invoice'))}
+              {kartu('Belum lunas', belum.length, `Tagihan ${formatIDR(belum.reduce((a, i) => a + num(i.total), 0))}`, IconWallet, 'bg-amber-50 text-amber-600', () => setActiveTab('invoice'))}
+              {kartu('Surat jalan bulan ini', sjBulan.length, 'Termasuk yang dibuat otomatis dari invoice', IconTruck, 'bg-emerald-50 text-emerald-600', () => setActiveTab('suratjalan'))}
+              {kartu(`Pengeluaran ${y}`, expTahun.length, 'Catatan beban tahun ini', IconTrendingDown, 'bg-rose-50 text-rose-600', () => setActiveTab('pengeluaran'))}
+            </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100"><h2 className="text-lg font-bold text-slate-800">Invoice belum lunas</h2></div>
+              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[560px]">
+                <tbody className="divide-y divide-slate-100">
+                  {belum.length === 0 ? <tr><td className="px-6 py-6 text-center text-slate-400">Semua invoice sudah lunas.</td></tr> : belum.slice(0, 10).map(i => (
+                    <tr key={i.id}><td className="px-6 py-3 font-bold text-blue-700">{i.id}</td><td className="px-6 py-3">{i.date}</td><td className="px-6 py-3 font-semibold">{i.customer}</td><td className="px-6 py-3 text-right font-bold tabular-nums">{formatIDR(i.total)}</td></tr>
+                  ))}
+                </tbody>
+              </table></div>
+            </div>
+            {tanpaSJ.length > 0 && <p className="text-sm text-amber-700">{tanpaSJ.length} invoice belum memiliki surat jalan — buat dari menu Invoice.</p>}
+          </div>
+        );
+      };
+
       const renderDashboard = () => {
+        if (!isAdmin) return renderDashboardStaff();
         const R = ledgerResult, lr = R.lr;
         const bebanTotal = lr.hpp + lr.bebanOperasional + lr.penyusutan;
         const ppnTahun = R.ppnMasa.reduce((a, m) => ({ k: a.k + m.keluaran, m: a.m + m.masukan }), { k: 0, m: 0 });
@@ -2048,7 +2173,7 @@
           {R.peringatan.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-sm space-y-1">
               {R.peringatan.map((t, k) => <div key={k} className="flex items-start gap-2"><IconAlertCircle size={16}/> <span>{t}</span></div>)}
-              <button onClick={() => { setActiveTab('laporan'); setLapTab('pengaturan'); }} className="mt-2 text-xs font-bold underline">Lengkapi di Laporan → Saldo Awal &amp; Data Pendukung</button>
+              <button onClick={() => setActiveTab('datakeu')} className="mt-2 text-xs font-bold underline">Lengkapi di menu Data Keuangan</button>
             </div>
           )}
 
@@ -2101,9 +2226,9 @@
               <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-lg font-bold text-slate-800">Laba Rugi {lapYear}</h2>
-                  <p className="text-sm text-slate-500 mt-1">Ringkasan — rincian lengkap di tab Laporan.</p>
+                  <p className="text-sm text-slate-500 mt-1">Ringkasan — rincian per jenis biaya di menu Laba Rugi.</p>
                 </div>
-                <button onClick={() => { setActiveTab('laporan'); setLapTab('labarugi'); }} className="text-sm font-bold text-blue-600 hover:underline whitespace-nowrap">Lihat lengkap →</button>
+                <button onClick={() => setActiveTab('labarugi')} className="text-sm font-bold text-blue-600 hover:underline whitespace-nowrap">Lihat lengkap →</button>
               </div>
               <div className="px-6 pb-6 overflow-x-auto">
                 <table className="w-full text-sm min-w-[360px]"><tbody>
@@ -2125,7 +2250,7 @@
                   <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2"><IconLandmark size={20} className="text-emerald-600" /> Pajak {lapYear}</h2>
                   <p className="text-sm text-slate-500 mt-1">PPN dari invoice PPN; PPh Badan dari seluruh peredaran usaha.</p>
                 </div>
-                <button onClick={() => { setActiveTab('laporan'); setLapTab('pajak'); }} className="text-sm font-bold text-emerald-700 hover:underline whitespace-nowrap">Rincian →</button>
+                <button onClick={() => setActiveTab('pajak')} className="text-sm font-bold text-emerald-700 hover:underline whitespace-nowrap">Rincian →</button>
               </div>
               <div className="px-6 pb-6 overflow-x-auto">
                 <table className="w-full text-sm min-w-[360px]"><tbody>
@@ -2347,25 +2472,41 @@
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Pajak</th>
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-right">Total Tagihan</th>
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Pembayaran</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Dokumen</th>
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(!invoices || invoices.length === 0) ? (
-                  <tr><td colSpan="7" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
-                ) : invoices.map((inv) => (
+                  <tr><td colSpan="8" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
+                ) : invoices.map((inv) => {
+                  const sjLink = (suratJalan || []).find(d => d && d.invoiceId === inv?.id);
+                  const kwLink = (kwitansi || []).find(d => d && d.invoiceId === inv?.id);
+                  return (
                   <tr key={inv?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
                     <td className="px-6 py-4 font-bold text-blue-700 text-sm">{inv?.id}</td>
                     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{inv?.date}</td>
                     <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{inv?.customer}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold ${inv?.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{inv?.usePpn ? 'PPN':'Non-PPN'}</span>
+                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold whitespace-nowrap ${inv?.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{inv?.usePpn ? 'PPN':'Non-PPN'}</span>
                     </td>
                     <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(inv?.total)}</td>
                     <td className="px-6 py-4">
                       {inv?.paidDate
                         ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 whitespace-nowrap" title="Tanggal pelunasan">Lunas · {inv.paidDate}</span>
                         : <button onClick={() => markInvoicePaid(inv, todayStr())} className="px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 whitespace-nowrap" title="Tandai lunas hari ini (tanggal bisa diubah lewat Edit)">Belum lunas · Tandai lunas</button>}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1 items-start">
+                        {sjLink
+                          ? <button onClick={() => setActiveTab('suratjalan')} className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 whitespace-nowrap" title={sjLink.id}>SJ ✓ {String(sjLink.id).slice(0, 4)}</button>
+                          : <button onClick={() => buatDokumenDariInvoice(inv, 'sj')} className="px-2 py-0.5 rounded text-[11px] font-bold border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50 whitespace-nowrap">+ Surat jalan</button>}
+                        {kwLink
+                          ? <button onClick={() => setActiveTab('kwitansi')} className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 border border-amber-100 text-amber-700 whitespace-nowrap" title={kwLink.id}>KWT ✓ {String(kwLink.id).slice(0, 4)}</button>
+                          : inv?.paidDate
+                            ? <button onClick={() => buatDokumenDariInvoice(inv, 'kwt')} className="px-2 py-0.5 rounded text-[11px] font-bold border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50 whitespace-nowrap">+ Kwitansi</button>
+                            : <span className="text-[11px] text-slate-400 whitespace-nowrap" title="Kwitansi dibuat saat invoice lunas">KWT saat lunas</span>}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
@@ -2376,7 +2517,8 @@
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -2399,6 +2541,9 @@
                     <input type="checkbox" id="usePpnToggle" checked={invoiceForm.usePpn} onChange={(e) => setInvoiceForm({...invoiceForm, usePpn: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-slate-300" />
                     <label htmlFor="usePpnToggle" className="text-sm font-black text-blue-900 cursor-pointer">Tagih PPN <span className="font-semibold text-blue-700">(12% × DPP nilai lain 11/12 — efektif 11%)</span></label>
                   </div>
+                  <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 -mt-2">{editingId
+                    ? 'Surat jalan & kwitansi yang terhubung dengan invoice ini ikut diperbarui (pelanggan, barang, nominal, tanggal lunas).'
+                    : 'Surat jalan dibuat otomatis saat invoice disimpan. Kwitansi dibuat otomatis saat invoice lunas (isi tanggal pelunasan atau klik “Tandai lunas”).'}</p>
                   <div>
                     <div className="flex justify-between items-center mb-4">
                       <label className="block text-base font-black text-slate-800">Rincian Tagihan</label>
@@ -2458,10 +2603,10 @@
                   <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
                 ) : suratJalan.map((sj) => (
                   <tr key={sj?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
-                    <td className="px-6 py-4 font-bold text-emerald-700 text-sm">{sj?.id}</td>
+                    <td className="px-6 py-4 font-bold text-emerald-700 text-sm">{sj?.id}{sj?.invoiceId && <span className="block text-[11px] font-semibold text-slate-400">dari {sj.invoiceId}</span>}</td>
                     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{sj?.date}</td>
                     <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{sj?.customer}</td>
-                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{sj?.driver} <span className="text-slate-400">({sj?.vehicle})</span></td>
+                    <td className="px-6 py-4 text-slate-600 text-sm font-medium">{sj?.driver || sj?.vehicle ? <>{sj?.driver} <span className="text-slate-400">({sj?.vehicle})</span></> : <span className="text-amber-600 text-xs font-bold">Lengkapi pengemudi &amp; kendaraan (Edit)</span>}</td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
                         <button onClick={() => setPrintData({type: 'sj', item: sj})} className="p-1.5 text-slate-400 hover:text-emerald-600"><IconPrinter size={18}/></button>
@@ -2549,7 +2694,7 @@
                   <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
                 ) : kwitansi.map((kwt) => (
                   <tr key={kwt?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
-                    <td className="px-6 py-4 font-bold text-amber-700 text-sm">{kwt?.id}</td>
+                    <td className="px-6 py-4 font-bold text-amber-700 text-sm">{kwt?.id}{kwt?.invoiceId && <span className="block text-[11px] font-semibold text-slate-400">dari {kwt.invoiceId}</span>}</td>
                     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{kwt?.date}</td>
                     <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{kwt?.receivedFrom}</td>
                     <td className="px-6 py-4 text-slate-600 text-sm">{kwt?.purpose}</td>
@@ -2604,7 +2749,13 @@
         const O = ledger.opening;
         const saldoLabaAwal = (O.kas + O.piutang + O.persediaan + O.asetTetap - O.akumPenyusutan) - (O.utangUsaha + O.utangPajak + O.pinjaman) - O.modal;
         const belumLunas = (invoices || []).filter(i => i && i.date && !i.paidDate);
-        const tabs = [['labarugi', 'Laba Rugi'], ['neraca', 'Neraca'], ['pajak', 'Pajak (PPN & PPh)'], ['pengaturan', 'Saldo Awal & Data Pendukung']];
+        const lapTab = activeTab === 'datakeu' ? 'pengaturan' : activeTab;
+        const JUDUL = {
+          labarugi: ['Laba Rugi', 'Pendapatan, harga pokok, dan beban per jenis biaya untuk tahun buku terpilih.'],
+          neraca: ['Neraca', 'Posisi aset, liabilitas, dan ekuitas per 31 Desember tahun buku terpilih.'],
+          pajak: ['Pajak (PPN & PPh Badan)', 'PPN per masa dan estimasi PPh Badan dari seluruh peredaran usaha.'],
+          pengaturan: ['Data Keuangan', 'Saldo awal, persediaan akhir, pelunasan invoice, aset tetap, dan transaksi kas lain — dasar perhitungan Laba Rugi, Neraca, dan Pajak.'],
+        }[lapTab];
         const inputCls = 'w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400 tabular-nums';
         const box = 'bg-white rounded-2xl border border-slate-200 shadow-sm';
 
@@ -2612,13 +2763,16 @@
           <div className="space-y-6">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Laporan Keuangan &amp; Pajak</h2>
-                <p className="text-sm text-slate-500 mt-1 max-w-2xl">Disusun dengan basis akrual mengacu SAK EMKM. Angka pajak adalah <b>estimasi</b> — cocokkan dengan konsultan pajak sebelum melapor SPT.</p>
+                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{JUDUL[0]}</h2>
+                <p className="text-sm text-slate-500 mt-1 max-w-2xl">{JUDUL[1]} {lapTab !== 'pengaturan' && <>Basis akrual mengacu SAK EMKM{lapTab === 'pajak' ? <>; angka pajak adalah <b>estimasi</b> — cocokkan dengan konsultan pajak sebelum melapor SPT</> : ''}.</>}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {yearSelect()}
-                <button onClick={() => setPrintData({ type: 'lapkeu', item: R })} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-800 text-white flex items-center gap-2"><IconPrinter size={16}/> Cetak</button>
-                <button onClick={() => setPrintData({ type: 'lapkeu', item: R, autoDownload: true })} className="px-4 py-2 rounded-lg text-sm font-bold bg-rose-600 text-white flex items-center gap-2"><IconDownload size={16}/> PDF</button>
+                {lapTab !== 'pengaturan' && <>
+                  <button onClick={() => setPrintData({ type: 'lapkeu', item: R, part: lapTab })} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-800 text-white flex items-center gap-2"><IconPrinter size={16}/> Cetak</button>
+                  <button onClick={() => setPrintData({ type: 'lapkeu', item: R, part: lapTab, autoDownload: true })} className="px-4 py-2 rounded-lg text-sm font-bold bg-rose-600 text-white flex items-center gap-2"><IconDownload size={16}/> PDF</button>
+                  <button onClick={() => setPrintData({ type: 'lapkeu', item: R })} className="px-3 py-2 rounded-lg text-sm font-bold border border-slate-300 text-slate-600 hover:bg-slate-50" title="Cetak Laba Rugi, Neraca, dan Pajak sekaligus">Cetak semua</button>
+                </>}
               </div>
             </div>
 
@@ -2627,12 +2781,6 @@
                 {R.peringatan.map((t, k) => <div key={k} className="flex items-start gap-2"><IconAlertCircle size={16}/> <span>{t}</span></div>)}
               </div>
             )}
-
-            <div className="flex gap-2 overflow-x-auto">
-              {tabs.map(([k, l]) => (
-                <button key={k} onClick={() => setLapTab(k)} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap border ${lapTab === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{l}</button>
-              ))}
-            </div>
 
             {lapTab === 'labarugi' && (
               <div className={`${box} p-6 max-w-3xl`}>
@@ -2647,11 +2795,13 @@
                   {lrHead('Harga pokok penjualan')}
                   {lrRow('Persediaan awal', lr.persAwal, { indent: true })}
                   {lrRow('Pembelian barang/bahan', lr.pembelian, { indent: true })}
+                  {lr.pembelianPerJenis.map(([j, v]) => lrRow(j, v, { sub: true, key: 'hpp-' + j }))}
                   {lrRow('Persediaan akhir', lr.persAkhir, { indent: true, neg: true, note: lr.persAkhirDiisi ? 'hasil stock opname' : 'belum diisi — dianggap Rp0' })}
                   {lrRow('Jumlah harga pokok penjualan', lr.hpp, { total: true, neg: true })}
                   {lrRow('LABA KOTOR', lr.labaKotor, { total: true })}
                   {lrHead('Beban usaha')}
                   {lrRow('Beban operasional', lr.bebanOperasional, { indent: true })}
+                  {lr.bebanPerJenis.map(([j, v]) => lrRow(j, v, { sub: true, key: 'op-' + j }))}
                   {lrRow('Beban penyusutan aset tetap', lr.penyusutan, { indent: true })}
                   {lrRow('Jumlah beban usaha', lr.bebanOperasional + lr.penyusutan, { total: true, neg: true })}
                   {lrRow('LABA USAHA', lr.labaUsaha, { total: true })}
@@ -2744,7 +2894,7 @@
                       </tbody>
                     </table>
                   </div>
-                  <p className="text-xs text-slate-500 mt-3">PPN masukan diambil dari kolom “PPN Masukan” di Pengeluaran (hanya yang memiliki faktur pajak). Setoran dicatat di Saldo Awal &amp; Data Pendukung → Transaksi kas (jenis “Setor PPN”).</p>
+                  <p className="text-xs text-slate-500 mt-3">PPN masukan diambil dari kolom “PPN Masukan” di Pengeluaran (hanya yang memiliki faktur pajak). Setoran dicatat di menu Data Keuangan → Transaksi kas lain (jenis “Setor PPN”).</p>
                 </div>
 
                 <div className={`${box} p-6 max-w-3xl`}>
@@ -2874,12 +3024,49 @@
         );
       };
 
-      const renderPengeluaran = () => (
+      const renderPengeluaran = () => {
+        const tahunExp = Array.from(new Set((expenses || []).map(e => (e?.date || '').slice(0, 4)).filter(Boolean))).sort().reverse();
+        const pilihanJenis = expFilter.category === 'all' ? [...new Set([...JENIS_BIAYA.HPP, ...JENIS_BIAYA.Operasional])] : JENIS_BIAYA[expFilter.category];
+        const daftar = (expenses || []).filter(e => e
+          && (expFilter.year === 'all' || (e.date || '').startsWith(expFilter.year))
+          && (expFilter.category === 'all' || (expFilter.category === 'HPP' ? e.category === 'HPP' : e.category !== 'HPP'))
+          && (expFilter.jenis === 'all' || (e.jenis || JENIS_KOSONG) === expFilter.jenis));
+        const totalDaftar = daftar.reduce((a, e) => a + num(e.amount), 0);
+        const rekap = rekapJenis(daftar);
+        const selCls = 'text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 font-semibold outline-none cursor-pointer';
+        return (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div><h2 className="text-2xl font-bold text-slate-800 tracking-tight">Catatan Pengeluaran</h2></div>
             <button onClick={() => openNewModal('expense')} className="bg-rose-600 hover:bg-rose-700 text-white px-5 py-2 rounded-lg font-semibold flex items-center gap-2"><IconPlus size={20} /> Catat Beban</button>
           </div>
+          <div className="flex flex-wrap items-center gap-2 p-3 bg-white border border-slate-200 rounded-2xl shadow-sm">
+            <IconFilter size={16} />
+            <select aria-label="Filter tahun" value={expFilter.year} onChange={(e) => setExpFilter({ ...expFilter, year: e.target.value })} className={selCls}>
+              <option value="all">Semua tahun</option>{tahunExp.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select aria-label="Filter kategori" value={expFilter.category} onChange={(e) => setExpFilter({ ...expFilter, category: e.target.value, jenis: 'all' })} className={selCls}>
+              <option value="all">Semua kategori</option><option value="Operasional">Beban operasional</option><option value="HPP">Pembelian (HPP)</option>
+            </select>
+            <select aria-label="Filter jenis biaya" value={expFilter.jenis} onChange={(e) => setExpFilter({ ...expFilter, jenis: e.target.value })} className={selCls}>
+              <option value="all">Semua jenis biaya</option>{pilihanJenis.map(j => <option key={j} value={j}>{j}</option>)}<option value={JENIS_KOSONG}>{JENIS_KOSONG}</option>
+            </select>
+            <span className="ml-auto text-sm text-slate-500">{daftar.length} catatan · <b className="text-rose-600 tabular-nums">{formatIDR(totalDaftar)}</b></span>
+          </div>
+          {rekap.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider mb-3">Rekap per jenis biaya</h3>
+              <div className="grid sm:grid-cols-2 gap-x-8 gap-y-2">
+                {rekap.map(([j, v]) => (
+                  <button key={j} onClick={() => setExpFilter({ ...expFilter, jenis: expFilter.jenis === j ? 'all' : j })} className={`text-left group ${expFilter.jenis === j ? 'opacity-100' : ''}`} title="Klik untuk menyaring">
+                    <div className="flex justify-between text-sm"><span className={`font-semibold ${j === JENIS_KOSONG ? 'text-amber-700' : 'text-slate-700'} group-hover:underline`}>{j}</span><span className="tabular-nums font-bold text-slate-800">{formatIDR(v)}</span></div>
+                    <div className="h-1.5 bg-slate-100 rounded-full mt-1"><div className={`h-1.5 rounded-full ${j === JENIS_KOSONG ? 'bg-amber-400' : 'bg-rose-500'}`} style={{ width: `${totalDaftar ? Math.max(2, v / totalDaftar * 100) : 0}%` }}></div></div>
+                  </button>
+                ))}
+              </div>
+              {rekap.some(([j]) => j === JENIS_KOSONG) && <p className="text-xs text-amber-700 mt-3">Catatan lama belum punya jenis biaya — buka Edit pada catatan tersebut dan pilih jenisnya.</p>}
+            </div>
+          )}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
             <table className="w-full text-left min-w-[600px]">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
@@ -2887,7 +3074,7 @@
                   <th className="px-6 py-4 text-xs font-bold uppercase">No. Ref</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase">Tanggal</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase">Deskripsi</th>
-                  <th className="px-6 py-4 text-xs font-bold uppercase">Kategori</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase">Kategori / Jenis biaya</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase text-right">Nominal Beban</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase text-right">PPN Masukan</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase">Pembayaran</th>
@@ -2895,9 +3082,9 @@
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(!expenses || expenses.length === 0) ? (
-                    <tr><td colSpan="8" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada pengeluaran tercatat.</td></tr>
-                ) : expenses.map((exp) => (
+                {daftar.length === 0 ? (
+                    <tr><td colSpan="8" className="px-6 py-8 text-center text-slate-500 font-medium">{(expenses || []).length ? 'Tidak ada pengeluaran yang cocok dengan filter.' : 'Belum ada pengeluaran tercatat.'}</td></tr>
+                ) : daftar.map((exp) => (
                   <tr key={exp?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
                     <td className="px-6 py-4 font-semibold text-slate-500 text-sm">{exp?.id}</td>
                     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{exp?.date}</td>
@@ -2905,6 +3092,7 @@
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.category === 'HPP' ? 'bg-orange-50 border-orange-100 text-orange-700':'bg-purple-50 border-purple-100 text-purple-700'}`}>{exp?.category === 'HPP' ? 'Pembelian (HPP)' : 'Operasional'}</span>
                       {exp?.nonDeductible && <span className="ml-1.5 px-2 py-1 rounded-md text-[10px] font-bold border bg-slate-100 border-slate-200 text-slate-600" title="Tidak dapat dikurangkan secara pajak (koreksi fiskal positif)">Non-deductible</span>}
+                      <span className={`block mt-1.5 text-xs font-semibold ${exp?.jenis ? 'text-slate-500' : 'text-amber-600'}`}>{exp?.jenis || JENIS_KOSONG}</span>
                     </td>
                     <td className="px-6 py-4 text-right font-bold text-rose-600">{formatIDR(exp?.amount)}</td>
                     <td className="px-6 py-4 text-right text-sm text-slate-600">{num(exp?.ppnMasukan) ? formatIDR(exp.ppnMasukan) : '—'}</td>
@@ -2936,7 +3124,8 @@
                 <div className="p-6 space-y-4 bg-white overflow-y-auto">
                   <div><label className="block text-sm font-semibold text-slate-700 mb-1">Tanggal</label><input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
                   <div><label className="block text-sm font-semibold text-slate-700 mb-1">Deskripsi Beban</label><input type="text" value={expenseForm.desc} onChange={(e) => setExpenseForm({...expenseForm, desc: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
-                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Kategori Akuntansi</label><select value={expenseForm.category} onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none font-medium cursor-pointer"><option value="Operasional">Beban Operasional (gaji, sewa, listrik, transport, dll.)</option><option value="HPP">Pembelian Barang/Bahan untuk Dijual (HPP)</option></select></div>
+                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Kategori Akuntansi</label><select value={expenseForm.category} onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value, jenis: ''})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none font-medium cursor-pointer"><option value="Operasional">Beban Operasional (gaji, sewa, listrik, transport, dll.)</option><option value="HPP">Pembelian Barang/Bahan untuk Dijual (HPP)</option></select></div>
+                  <div><label htmlFor="jenisBiaya" className="block text-sm font-semibold text-slate-700 mb-1">Jenis Biaya</label><select id="jenisBiaya" value={expenseForm.jenis || ''} onChange={(e) => setExpenseForm({...expenseForm, jenis: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none font-medium cursor-pointer"><option value="">— Pilih jenis biaya —</option>{JENIS_BIAYA[expenseForm.category === 'HPP' ? 'HPP' : 'Operasional'].map(j => <option key={j} value={j}>{j}</option>)}</select></div>
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="block text-sm font-semibold text-slate-700 mb-1">Nominal (Rp)</label><input type="number" min="0" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
                     <div><label className="block text-sm font-semibold text-slate-700 mb-1">PPN Masukan (Rp)</label><input type="number" min="0" value={expenseForm.ppnMasukan || 0} onChange={(e) => setExpenseForm({...expenseForm, ppnMasukan: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
@@ -2960,7 +3149,8 @@
             </div>
           )}
         </div>
-      );
+        );
+      };
 
       return (
         <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans relative">
@@ -2969,7 +3159,10 @@
               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 text-center border">
                 <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-rose-100"><IconAlertCircle size={32} /></div>
                 <h3 className="text-xl font-black text-slate-800 mb-1">Hapus Data?</h3>
-                <p className="text-sm text-slate-500 mb-6">Data akan dihapus permanen. Nomor dokumen lain tidak berubah.</p>
+                <p className="text-sm text-slate-500 mb-6">Data akan dihapus permanen. Nomor dokumen lain tidak berubah.{deleteConfirm.type === 'invoice' && (() => {
+                  const linked = [...(suratJalan || []), ...(kwitansi || [])].filter(d => d && d.invoiceId === deleteConfirm.id).map(d => d.id);
+                  return linked.length ? <span className="block mt-2 text-rose-600 font-semibold">Ikut terhapus: {linked.join(', ')}</span> : null;
+                })()}</p>
                 <div className="flex gap-3">
                   <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-sm">Batal</button>
                   <button onClick={executeDelete} className="flex-1 py-2 bg-rose-600 text-white font-bold rounded-xl text-sm">Hapus</button>
@@ -3008,12 +3201,14 @@
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-4">
+              {isAdmin && <>
               <button onClick={() => handleBackup()} className="flex items-center gap-1.5 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 hover:border-slate-500 px-2.5 sm:px-3 py-1.5 rounded-lg" title="Unduh backup data (JSON)">
                 <IconDownload size={15}/> <span className="hidden lg:inline">Backup</span>
               </button>
               <button onClick={() => restoreInputRef.current && restoreInputRef.current.click()} className="flex items-center gap-1.5 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 hover:border-slate-500 px-2.5 sm:px-3 py-1.5 rounded-lg" title="Pulihkan data dari file backup">
                 <IconUpload size={15}/> <span className="hidden lg:inline">Pulihkan</span>
               </button>
+              </>}
               <button onClick={onBackToSite} className="flex items-center gap-1.5 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 hover:border-slate-500 px-3 py-1.5 rounded-lg" title="Lihat Website">
                 <IconGlobe size={15}/> <span className="hidden sm:inline">Website</span>
               </button>
@@ -3023,7 +3218,7 @@
                   {isSyncing && <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full">Menyimpan...</span>}
                   {!isSyncing && syncError && <span className="text-[10px] bg-rose-600 text-white px-2 py-0.5 rounded-full">Belum tersimpan</span>}
                 </div>
-                <p className="text-xs font-medium text-slate-400">{currentUser?.username}</p>
+                <p className="text-xs font-medium text-slate-400">{currentUser?.username} · {isAdmin ? 'Admin' : 'Staff'}</p>
               </div>
               <div className="w-9 h-9 bg-red-600 text-white rounded-full flex items-center justify-center font-bold border border-red-500">{currentUser?.initial}</div>
               <button onClick={handleLogout} className="text-slate-400 hover:text-rose-400 p-2 rounded-full hover:bg-slate-800" title="Keluar"><IconLogOut size={20} /></button>
@@ -3032,15 +3227,20 @@
           <div className="hazard h-1 sticky top-16 z-30"></div>
 
           <nav className="bg-white border-b border-slate-200 shadow-sm hidden md:flex items-center justify-center z-20 sticky top-[68px]">
-            <div className="flex overflow-x-auto w-full max-w-7xl px-8 gap-2">
-              <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'dashboard' ? 'border-blue-600 text-blue-600 bg-blue-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconDashboard size={18}/> Dasbor Utama</button>
-              <button onClick={() => setActiveTab('kalender')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'kalender' ? 'border-cyan-600 text-cyan-600 bg-cyan-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconCalendar size={18}/> Kalender Proyek</button>
-              <button onClick={() => setActiveTab('penawaran')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'penawaran' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconBriefcase size={18}/> Penawaran</button>
-              <button onClick={() => setActiveTab('invoice')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'invoice' ? 'border-blue-600 text-blue-600 bg-blue-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconFileText size={18}/> Invoice</button>
-              <button onClick={() => setActiveTab('suratjalan')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'suratjalan' ? 'border-emerald-600 text-emerald-600 bg-emerald-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTruck size={18}/> Surat Jalan</button>
-              <button onClick={() => setActiveTab('kwitansi')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'kwitansi' ? 'border-amber-600 text-amber-600 bg-amber-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconReceipt size={18}/> Kwitansi</button>
-              <button onClick={() => setActiveTab('pengeluaran')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'pengeluaran' ? 'border-rose-600 text-rose-600 bg-rose-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTrendingDown size={18}/> Pengeluaran</button>
-              <button onClick={() => setActiveTab('laporan')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'laporan' ? 'border-slate-900 text-slate-900 bg-slate-100':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconLandmark size={18}/> Laporan</button>
+            <div className="flex overflow-x-auto w-full max-w-screen-2xl px-4 gap-1">
+              <button onClick={() => setActiveTab('dashboard')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'dashboard' ? 'border-blue-600 text-blue-600 bg-blue-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconDashboard size={18}/> Dasbor</button>
+              <button onClick={() => setActiveTab('kalender')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'kalender' ? 'border-cyan-600 text-cyan-600 bg-cyan-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconCalendar size={18}/> Kalender</button>
+              <button onClick={() => setActiveTab('penawaran')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'penawaran' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconBriefcase size={18}/> Penawaran</button>
+              <button onClick={() => setActiveTab('invoice')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'invoice' ? 'border-blue-600 text-blue-600 bg-blue-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconFileText size={18}/> Invoice</button>
+              <button onClick={() => setActiveTab('suratjalan')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'suratjalan' ? 'border-emerald-600 text-emerald-600 bg-emerald-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTruck size={18}/> Surat Jalan</button>
+              <button onClick={() => setActiveTab('kwitansi')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'kwitansi' ? 'border-amber-600 text-amber-600 bg-amber-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconReceipt size={18}/> Kwitansi</button>
+              <button onClick={() => setActiveTab('pengeluaran')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'pengeluaran' ? 'border-rose-600 text-rose-600 bg-rose-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTrendingDown size={18}/> Pengeluaran</button>
+              {isAdmin && <>
+                <span className="w-px bg-slate-200 my-2 mx-1 shrink-0"></span>
+                {[['labarugi', 'Laba Rugi', IconBarChart2], ['neraca', 'Neraca', IconLandmark], ['pajak', 'Pajak', IconCalculator], ['datakeu', 'Data Keuangan', IconClipboard]].map(([k, l, Ic]) => (
+                  <button key={k} onClick={() => setActiveTab(k)} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === k ? 'border-slate-900 text-slate-900 bg-slate-100':'border-transparent text-slate-500 hover:bg-slate-50'}`}><Ic size={18}/> {l}</button>
+                ))}
+              </>}
             </div>
           </nav>
 
@@ -3067,7 +3267,7 @@
               {activeTab === 'suratjalan' && renderSuratJalan()}
               {activeTab === 'kwitansi' && renderKwitansi()}
               {activeTab === 'pengeluaran' && renderPengeluaran()}
-              {activeTab === 'laporan' && renderLaporan()}
+              {isAdmin && MENU_LAPORAN.includes(activeTab) && renderLaporan()}
             </div>
           </main>
 
@@ -3079,7 +3279,9 @@
             <button onClick={() => setActiveTab('suratjalan')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'suratjalan' ? 'text-emerald-600 bg-emerald-50':'text-slate-400'}`}><IconTruck size={20}/> SJ</button>
             <button onClick={() => setActiveTab('kwitansi')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'kwitansi' ? 'text-amber-600 bg-amber-50':'text-slate-400'}`}><IconReceipt size={20}/> KWT</button>
             <button onClick={() => setActiveTab('pengeluaran')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'pengeluaran' ? 'text-rose-600 bg-rose-50':'text-slate-400'}`}><IconTrendingDown size={20}/> Beban</button>
-            <button onClick={() => setActiveTab('laporan')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'laporan' ? 'text-slate-900 bg-slate-100':'text-slate-400'}`}><IconLandmark size={20}/> Laporan</button>
+            {isAdmin && [['labarugi', 'Laba Rugi', IconBarChart2], ['neraca', 'Neraca', IconLandmark], ['pajak', 'Pajak', IconCalculator], ['datakeu', 'Data Keu', IconClipboard]].map(([k, l, Ic]) => (
+              <button key={k} onClick={() => setActiveTab(k)} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl whitespace-nowrap ${activeTab === k ? 'text-slate-900 bg-slate-100':'text-slate-400'}`}><Ic size={20}/> {l}</button>
+            ))}
           </nav>
         </div>
       );
