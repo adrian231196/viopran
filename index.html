@@ -238,6 +238,251 @@
       return renumberedArray.sort((a, b) => new Date(b?.date || 0) - new Date(a?.date || 0));
     };
 
+    // Nomor dokumen PERMANEN: setelah diterbitkan tidak pernah dinomori ulang
+    // (sesuai praktik pembukuan & faktur — penghapusan meninggalkan celah nomor, bukan menggeser nomor lain).
+    const DOC_ID_RE = /^(\d{4})\/([A-Z]+(?:-[A-Z]+)?)\/NVP\/APK-SERT\/(\d{4})$/;
+    const docPrefix = (base, hasPpn, usePpn) => hasPpn ? `${base}-${usePpn ? 'PPN' : 'NON'}` : base;
+    function nextDocNumber(list, base, hasPpn, item) {
+      const year = (item.date || String(new Date().getFullYear())).substring(0, 4);
+      const prefix = docPrefix(base, hasPpn, item.usePpn);
+      let max = 0;
+      (list || []).forEach(d => { const m = DOC_ID_RE.exec((d && d.id) || ''); if (m && m[2] === prefix && m[3] === year) max = Math.max(max, Number(m[1])); });
+      return `${String(max + 1).padStart(4, '0')}/${prefix}/NVP/APK-SERT/${year}`;
+    }
+    function keepOrRenumber(list, base, hasPpn, oldId, item) {
+      const m = DOC_ID_RE.exec(oldId || '');
+      const year = (item.date || '').substring(0, 4);
+      if (m && m[2] === docPrefix(base, hasPpn, item.usePpn) && m[3] === year) return oldId;
+      return nextDocNumber((list || []).filter(d => d && d.id !== oldId), base, hasPpn, item);
+    }
+    const sortByDateDesc = (arr) => [...arr].sort((a, b) => String(b?.date || '').localeCompare(String(a?.date || '')));
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+    const paren = (v) => `(${formatIDR(Math.abs(v || 0))})`;
+    const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+    // =====================================================================
+    // MESIN PEMBUKUAN (LEDGER) — murni perhitungan, tanpa tampilan
+    // Mengikuti SAK EMKM (basis akrual) untuk Laba Rugi & Laporan Posisi Keuangan,
+    // serta ketentuan PPN (PMK 131/2024) dan PPh Badan (UU PPh Ps. 17 & 31E,
+    // PP 55/2022 jo. PP 20/2026) untuk modul pajak.
+    // //LEDGER-START
+    const PPN_TARIF = 0.12;            // tarif PPN umum (UU HPP)
+    const PPN_DPP_NILAI_LAIN = 11 / 12; // DPP nilai lain untuk barang/jasa non-mewah (PMK 131/2024)
+    const PPH_BADAN_TARIF = 0.22;       // Pasal 17 ayat (1) huruf b UU PPh
+    const PPH_31E_BATAS_FASILITAS = 4800000000;  // bagian peredaran bruto yang mendapat fasilitas
+    const PPH_31E_BATAS_BRUTO = 50000000000;     // fasilitas berlaku s.d. peredaran bruto Rp50 M
+    const PPH_FINAL_UMKM = 0.005;       // PP 55/2022 — hanya untuk WP yang masih dalam masa transisi PP 20/2026
+
+    // Kelompok harta untuk penyusutan (Pasal 11 UU PPh, metode garis lurus)
+    const KELOMPOK_HARTA = {
+      k1:  { label: 'Kelompok 1 (4 thn) — komputer, peralatan kantor kecil', tahun: 4,  tarif: 0.25 },
+      k2:  { label: 'Kelompok 2 (8 thn) — kendaraan, mesin, mebel',        tahun: 8,  tarif: 0.125 },
+      k3:  { label: 'Kelompok 3 (16 thn) — mesin berat',                    tahun: 16, tarif: 0.0625 },
+      k4:  { label: 'Kelompok 4 (20 thn)',                                  tahun: 20, tarif: 0.05 },
+      bp:  { label: 'Bangunan permanen (20 thn)',                           tahun: 20, tarif: 0.05 },
+      bnp: { label: 'Bangunan tidak permanen (10 thn)',                     tahun: 10, tarif: 0.10 },
+      tanah: { label: 'Tanah (tidak disusutkan)',                           tahun: 0,  tarif: 0 },
+    };
+
+    // Jenis transaksi kas di luar invoice & beban
+    const JENIS_KAS = {
+      modal:               { label: 'Setoran modal pemilik',              arah: 1 },
+      prive:               { label: 'Prive / dividen ke pemilik',         arah: -1 },
+      pinjaman_masuk:      { label: 'Penerimaan pinjaman',                arah: 1 },
+      bayar_pinjaman:      { label: 'Pembayaran pokok pinjaman',          arah: -1 },
+      setor_ppn:           { label: 'Setor PPN ke kas negara',            arah: -1 },
+      setor_pph:           { label: 'Setor PPh Badan (Ps. 25/29/final)',  arah: -1 },
+      pendapatan_lain:     { label: 'Pendapatan lain-lain',               arah: 1 },
+      bunga_bank:          { label: 'Bunga / jasa giro bank (sudah PPh final)', arah: 1 },
+      terima_piutang_awal: { label: 'Pelunasan piutang saldo awal',       arah: 1 },
+      bayar_utang_awal:    { label: 'Pembayaran utang saldo awal',        arah: -1 },
+    };
+
+    const LEDGER_DEFAULT = {
+      opening: { kas: 0, piutang: 0, persediaan: 0, asetTetap: 0, akumPenyusutan: 0, utangUsaha: 0, utangPajak: 0, pinjaman: 0, modal: 0 },
+      closingInventory: {},   // { '2026': nilai persediaan akhir hasil stock opname }
+      pphScheme: 'umum',      // 'umum' (Ps.17 + 31E) | 'final05' (PP 55 — masa transisi)
+    };
+
+    const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+    const rp = (v) => Math.round(num(v));
+
+    function hitungPPN(subtotal) {
+      const dpp = rp(subtotal);
+      const dppNilaiLain = Math.round(dpp * PPN_DPP_NILAI_LAIN);
+      const ppn = Math.round(dppNilaiLain * PPN_TARIF);
+      return { subtotal: dpp, dppNilaiLain, ppn, total: dpp + ppn };
+    }
+
+    function normalizeLedger(l) {
+      const src = (l && typeof l === 'object') ? l : {};
+      const opening = { ...LEDGER_DEFAULT.opening };
+      Object.keys(opening).forEach(k => { opening[k] = num(src.opening && src.opening[k]); });
+      const closingInventory = {};
+      if (src.closingInventory && typeof src.closingInventory === 'object') {
+        Object.keys(src.closingInventory).forEach(y => {
+          const v = src.closingInventory[y];
+          if (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) closingInventory[y] = Number(v);
+        });
+      }
+      return { opening, closingInventory, pphScheme: src.pphScheme === 'final05' ? 'final05' : 'umum' };
+    }
+
+    // Tanggal efektif pelunasan tidak boleh sebelum tanggal transaksi
+    const maxDate = (a, b) => (a && b) ? (a > b ? a : b) : (a || b || '');
+    const invPaidDate = (inv) => inv && inv.paidDate ? maxDate(inv.date, inv.paidDate) : '';
+    const expIsUtang = (e) => e && e.paymentStatus === 'utang';
+    const expPaidDate = (e) => !e ? '' : (expIsUtang(e) ? (e.paidDate ? maxDate(e.date, e.paidDate) : '') : (e.date || ''));
+    const expGross = (e) => num(e && e.amount) + num(e && e.ppnMasukan);
+
+    function penyusutanKumulatif(asset, sampaiTahun) {
+      const k = KELOMPOK_HARTA[asset && asset.kelompok] || KELOMPOK_HARTA.k1;
+      const cost = num(asset && asset.cost);
+      if (!asset || !asset.date || !k.tarif || cost <= 0) return 0;
+      const y = Number(asset.date.substring(0, 4)), m = Number(asset.date.substring(5, 7));
+      if (sampaiTahun < y) return 0;
+      const bulan = (sampaiTahun - y) * 12 + (12 - m + 1);   // disusutkan mulai bulan perolehan
+      return Math.min(cost, cost * k.tarif / 12 * Math.max(0, bulan));
+    }
+
+    function hitungPPhBadan(pkp, bruto, scheme, pendapatanUsaha) {
+      if (scheme === 'final05') return { metode: 'PPh Final 0,5% × peredaran bruto (PP 55/2022, masa transisi PP 20/2026)', pph: Math.floor(pendapatanUsaha * PPH_FINAL_UMKM), pkpFasilitas: 0 };
+      if (pkp <= 0) return { metode: 'Tidak terutang (PKP nihil / rugi fiskal)', pph: 0, pkpFasilitas: 0 };
+      if (bruto <= PPH_31E_BATAS_FASILITAS) return { metode: 'Pasal 31E: seluruh PKP mendapat pengurangan 50% (tarif efektif 11%)', pph: Math.floor(pkp * PPH_BADAN_TARIF * 0.5), pkpFasilitas: pkp };
+      if (bruto <= PPH_31E_BATAS_BRUTO) {
+        const fas = Math.floor(PPH_31E_BATAS_FASILITAS / bruto * pkp);
+        return { metode: 'Pasal 31E: sebagian PKP (Rp4,8 M / peredaran bruto) mendapat pengurangan 50%', pph: Math.floor(fas * PPH_BADAN_TARIF * 0.5 + (pkp - fas) * PPH_BADAN_TARIF), pkpFasilitas: fas };
+      }
+      return { metode: 'Tarif umum Pasal 17 (22%)', pph: Math.floor(pkp * PPH_BADAN_TARIF), pkpFasilitas: 0 };
+    }
+
+    function computeLedger(db, year) {
+      const Y = Number(year);
+      const invoices = (db.invoices || []).filter(i => i && i.date);
+      const expenses = (db.expenses || []).filter(e => e && e.date);
+      const assets = (db.assets || []).filter(a => a && a.date);
+      const cashTx = (db.cashTx || []).filter(t => t && t.date && JENIS_KAS[t.type]);
+      const L = normalizeLedger(db.ledger);
+      const O = L.opening;
+
+      const years = [];
+      [...invoices, ...expenses, ...assets, ...cashTx].forEach(x => years.push(Number(x.date.substring(0, 4))));
+      const firstYear = Math.min(Y, ...(years.length ? years : [Y]));
+      const inYear = (d, y) => d && Number(d.substring(0, 4)) === y;
+
+      const persAkhir = (y) => (L.closingInventory[String(y)] !== undefined ? num(L.closingInventory[String(y)]) : 0);
+      const persAwal = (y) => (y <= firstYear ? O.persediaan : persAkhir(y - 1));
+      const sumTx = (type, pred) => cashTx.filter(t => t.type === type && pred(t.date)).reduce((s, t) => s + num(t.amount), 0);
+
+      function labaRugi(y) {
+        const inv = invoices.filter(i => inYear(i.date, y));
+        const exp = expenses.filter(e => inYear(e.date, y));
+        const penjualanPPN = inv.filter(i => i.usePpn).reduce((s, i) => s + num(i.subtotal), 0);
+        const penjualanNonPPN = inv.filter(i => !i.usePpn).reduce((s, i) => s + num(i.subtotal), 0);
+        const pendapatanUsaha = penjualanPPN + penjualanNonPPN;
+        const pembelian = exp.filter(e => e.category === 'HPP').reduce((s, e) => s + num(e.amount), 0);
+        const pAwal = persAwal(y), pAkhir = persAkhir(y);
+        const hpp = pAwal + pembelian - pAkhir;
+        const labaKotor = pendapatanUsaha - hpp;
+        const bebanOperasional = exp.filter(e => e.category !== 'HPP').reduce((s, e) => s + num(e.amount), 0);
+        const penyusutan = assets.reduce((s, a) => s + penyusutanKumulatif(a, y) - penyusutanKumulatif(a, y - 1), 0);
+        const labaUsaha = labaKotor - bebanOperasional - penyusutan;
+        const pendapatanLain = sumTx('pendapatan_lain', d => inYear(d, y));
+        const bungaBank = sumTx('bunga_bank', d => inYear(d, y));
+        const labaSebelumPajak = labaUsaha + pendapatanLain + bungaBank;
+
+        // Rekonsiliasi fiskal
+        const koreksiPositif = exp.filter(e => e.nonDeductible).reduce((s, e) => s + num(e.amount), 0);
+        const koreksiNegatif = bungaBank; // penghasilan yang sudah dikenai PPh final
+        const penghasilanNetoFiskal = labaSebelumPajak + koreksiPositif - koreksiNegatif;
+        const pkp = penghasilanNetoFiskal > 0 ? Math.floor(penghasilanNetoFiskal / 1000) * 1000 : 0;
+        const peredaranBruto = pendapatanUsaha + pendapatanLain;
+        const pph = hitungPPhBadan(pkp, peredaranBruto, L.pphScheme, pendapatanUsaha);
+        const labaBersih = labaSebelumPajak - pph.pph;
+
+        return { year: y, penjualanPPN, penjualanNonPPN, pendapatanUsaha, persAwal: pAwal, pembelian, persAkhir: pAkhir, persAkhirDiisi: L.closingInventory[String(y)] !== undefined, hpp, labaKotor, bebanOperasional, penyusutan, labaUsaha, pendapatanLain, bungaBank, labaSebelumPajak, koreksiPositif, koreksiNegatif, penghasilanNetoFiskal, pkp, peredaranBruto, pph, bebanPajak: pph.pph, labaBersih };
+      }
+
+      const lr = labaRugi(Y);
+      const D = `${Y}-12-31`;
+      const upTo = (d) => d && d <= D;
+
+      // ---------- Neraca per 31 Desember Y ----------
+      const invTerbit = invoices.filter(i => upTo(i.date));
+      const invLunas = invTerbit.filter(i => upTo(invPaidDate(i)));
+      const expTercatat = expenses.filter(e => upTo(e.date));
+      const expDibayar = expTercatat.filter(e => upTo(expPaidDate(e)));
+      const asetDibeli = assets.filter(a => upTo(a.date));
+      const kasMasukTx = cashTx.filter(t => upTo(t.date) && JENIS_KAS[t.type].arah > 0).reduce((s, t) => s + num(t.amount), 0);
+      const kasKeluarTx = cashTx.filter(t => upTo(t.date) && JENIS_KAS[t.type].arah < 0).reduce((s, t) => s + num(t.amount), 0);
+
+      const kas = O.kas + invLunas.reduce((s, i) => s + num(i.total), 0) - expDibayar.reduce((s, e) => s + expGross(e), 0)
+        - asetDibeli.reduce((s, a) => s + num(a.cost), 0) + kasMasukTx - kasKeluarTx;
+      const piutang = O.piutang - sumTx('terima_piutang_awal', upTo)
+        + invTerbit.filter(i => !upTo(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0);
+      const persediaan = persAkhir(Y);
+      const ppnKeluaranKum = invTerbit.reduce((s, i) => s + num(i.ppn), 0);
+      const ppnMasukanKum = expTercatat.reduce((s, e) => s + num(e.ppnMasukan), 0);
+      const ppnNet = ppnKeluaranKum - ppnMasukanKum - sumTx('setor_ppn', upTo);
+      const hargaPerolehan = O.asetTetap + asetDibeli.reduce((s, a) => s + num(a.cost), 0);
+      const akumulasi = O.akumPenyusutan + assets.reduce((s, a) => s + penyusutanKumulatif(a, Y), 0);
+
+      const utangUsaha = O.utangUsaha - sumTx('bayar_utang_awal', upTo)
+        + expTercatat.filter(e => !upTo(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0);
+      let pphTerutangKum = 0, labaDitahanSebelum = 0;
+      for (let y = firstYear; y <= Y; y++) {
+        const r = y === Y ? lr : labaRugi(y);
+        pphTerutangKum += r.bebanPajak;
+        if (y < Y) labaDitahanSebelum += r.labaBersih;
+      }
+      const pphNet = O.utangPajak + pphTerutangKum - sumTx('setor_pph', upTo);
+      const pinjaman = O.pinjaman + sumTx('pinjaman_masuk', upTo) - sumTx('bayar_pinjaman', upTo);
+      const modal = O.modal + sumTx('modal', upTo);
+
+      const openingAset = O.kas + O.piutang + O.persediaan + O.asetTetap - O.akumPenyusutan;
+      const openingKewajiban = O.utangUsaha + O.utangPajak + O.pinjaman;
+      const saldoLabaAwal = openingAset - openingKewajiban - O.modal;   // saldo penyeimbang
+      const priveSebelum = sumTx('prive', d => d && d < `${Y}-01-01`);
+      const priveTahunIni = sumTx('prive', d => inYear(d, Y));
+      const saldoLabaAwalTahun = saldoLabaAwal + labaDitahanSebelum - priveSebelum;
+      const saldoLabaAkhir = saldoLabaAwalTahun + lr.labaBersih - priveTahunIni;
+
+      const aset = {
+        kas, piutang, persediaan,
+        ppnLebihBayar: ppnNet < 0 ? -ppnNet : 0,
+        pphLebihBayar: pphNet < 0 ? -pphNet : 0,
+        hargaPerolehan, akumulasi, asetTetapNeto: hargaPerolehan - akumulasi,
+      };
+      aset.lancar = aset.kas + aset.piutang + aset.persediaan + aset.ppnLebihBayar + aset.pphLebihBayar;
+      aset.total = aset.lancar + aset.asetTetapNeto;
+      const liabilitas = { utangUsaha, utangPPN: ppnNet > 0 ? ppnNet : 0, utangPPh: pphNet > 0 ? pphNet : 0, pinjaman };
+      liabilitas.total = liabilitas.utangUsaha + liabilitas.utangPPN + liabilitas.utangPPh + liabilitas.pinjaman;
+      const ekuitas = { modal, saldoLabaAwalTahun, labaTahunBerjalan: lr.labaBersih, priveTahunIni, saldoLabaAkhir };
+      ekuitas.total = modal + saldoLabaAkhir;
+      const selisih = aset.total - (liabilitas.total + ekuitas.total);
+
+      // ---------- PPN per masa (bulan) tahun Y ----------
+      const ppnMasa = Array.from({ length: 12 }, (_, m) => {
+        const mm = `${Y}-${String(m + 1).padStart(2, '0')}`;
+        const kel = invoices.filter(i => i.date.startsWith(mm)).reduce((s, i) => s + num(i.ppn), 0);
+        const mas = expenses.filter(e => e.date.startsWith(mm)).reduce((s, e) => s + num(e.ppnMasukan), 0);
+        const dpp = invoices.filter(i => i.usePpn && i.date.startsWith(mm)).reduce((s, i) => s + num(i.subtotal), 0);
+        const setor = cashTx.filter(t => t.type === 'setor_ppn' && t.date.startsWith(mm)).reduce((s, t) => s + num(t.amount), 0);
+        return { bulan: m, dpp, keluaran: kel, masukan: mas, kurangBayar: kel - mas, setor };
+      });
+
+      const peringatan = [];
+      const belumLunasLama = invoices.filter(i => !i.paidDate && i.date < `${new Date().getFullYear()}-01-01`).length;
+      if (belumLunasLama) peringatan.push(`${belumLunasLama} invoice tahun lalu belum ditandai lunas — dianggap masih piutang.`);
+      if (!lr.persAkhirDiisi && (lr.pembelian > 0 || lr.persAwal > 0)) peringatan.push(`Persediaan akhir ${Y} belum diisi — seluruh pembelian dianggap terjual (HPP).`);
+      if (Math.abs(selisih) >= 1) peringatan.push(`Neraca selisih ${Math.round(selisih)} — periksa saldo awal.`);
+
+      return { year: Y, firstYear, lr, aset, liabilitas, ekuitas, selisih, ppnMasa, scheme: L.pphScheme, peringatan };
+    }
+    // //LEDGER-END
+
+
     // =====================================================================
     // WEBSITE PUBLIK — PT NURI VIRA PRATAMA | VIOPRAN FIRE EXTINGUISHER
     // =====================================================================
@@ -912,6 +1157,18 @@
       const [expenses, setExpenses] = useState([]);
       const [suratJalan, setSuratJalan] = useState([]);
       const [kwitansi, setKwitansi] = useState([]);
+      // Data pembukuan tambahan (kunci baru di file data; data lama tetap kompatibel)
+      const [assets, setAssets] = useState([]);
+      const [cashTx, setCashTx] = useState([]);
+      const [ledger, setLedger] = useState(() => normalizeLedger(null));
+      const [lapYear, setLapYear] = useState(String(new Date().getFullYear()));
+      const [lapTab, setLapTab] = useState('labarugi');
+      const [formError, setFormError] = useState('');
+      const emptyAssetForm = { date: '', name: '', cost: '', kelompok: 'k1' };
+      const emptyCashForm = { date: '', type: 'modal', amount: '', desc: '' };
+      const [assetForm, setAssetForm] = useState(emptyAssetForm);
+      const [cashForm, setCashForm] = useState(emptyCashForm);
+      const [bulkPaidUntil, setBulkPaidUntil] = useState(`${new Date().getFullYear() - 1}-12-31`);
 
       const [editingId, setEditingId] = useState(null);
       const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -921,8 +1178,8 @@
 
       const defaultPnwNotes = "1. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya jika masa berlaku telah habis.\n2. Sistem pembayaran dan termin waktu dapat didiskusikan lebih lanjut.";
       const emptyPenawaranForm = { date: '', validUntil: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Marketing Dept.', notes: defaultPnwNotes };
-      const emptyInvoiceForm = { date: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Finance Dept.' };
-      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', amount: 0 };
+      const emptyInvoiceForm = { date: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
+      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', paidDate: '', nonDeductible: false };
       const emptySjForm = { date: '', customer: '', driver: '', vehicle: '', items: [], signerName: '', signerRole: 'Warehouse Dept.' };
       const emptyKwitansiForm = { date: '', receivedFrom: '', amount: 0, purpose: '', signerName: '', signerRole: 'Finance Dept.' };
 
@@ -943,63 +1200,32 @@
 
       const currentYearStr = new Date().getFullYear().toString();
       const prevYearStr = (new Date().getFullYear() - 1).toString();
-      const [selectedTaxYear, setSelectedTaxYear] = useState(currentYearStr);
 
-      // --- MEMOIZED CALCULATIONS WITH Lap. KONSOLIDASI LABA RUGI TOTAL ---
-      const kasMasukPPN = useMemo(() => (invoices||[]).filter(inv => inv?.usePpn).reduce((sum, inv) => sum + (inv?.total || 0), 0), [invoices]);
-      const kasMasukNonPPN = useMemo(() => (invoices||[]).filter(inv => inv && !inv.usePpn).reduce((sum, inv) => sum + (inv?.total || 0), 0), [invoices]);
-      const totalKasMasuk = kasMasukPPN + kasMasukNonPPN;
-
-      const pendapatanResmiLabaRugi = useMemo(() => (invoices||[]).filter(inv => inv?.usePpn).reduce((sum, inv) => sum + (inv?.subtotal || 0), 0), [invoices]);
-      const pendapatanBebasLabaRugi = useMemo(() => (invoices||[]).filter(inv => !inv?.usePpn).reduce((sum, inv) => sum + (inv?.subtotal || 0), 0), [invoices]);
-      const totalHPP = useMemo(() => (expenses||[]).filter(e => e?.category === 'HPP').reduce((sum, e) => sum + (e?.amount || 0), 0), [expenses]);
-      const totalOperasional = useMemo(() => (expenses||[]).filter(e => e?.category === 'Operasional').reduce((sum, e) => sum + (e?.amount || 0), 0), [expenses]);
-
-      const labaKotorResmi = pendapatanResmiLabaRugi - totalHPP;
-      const labaBersihResmi = labaKotorResmi - totalOperasional;
-
-      // Perhitungan Laba Rugi Keseluruhan (Konsolidasi Total)
-      const totalPendapatanKonsolidasi = pendapatanResmiLabaRugi + pendapatanBebasLabaRugi;
-      const labaKotorKonsolidasi = totalPendapatanKonsolidasi - totalHPP;
-      const labaBersihKonsolidasi = labaKotorKonsolidasi - totalOperasional;
+      // --- PERHITUNGAN LAPORAN (mesin pembukuan, per tahun buku) ---
+      const ledgerResult = useMemo(() => computeLedger({ invoices, expenses, assets, cashTx, ledger }, lapYear), [invoices, expenses, assets, cashTx, ledger, lapYear]);
 
       const availableYears = useMemo(() => {
-        const years = new Set([currentYearStr]);
-        (invoices||[]).forEach(inv => { if(inv?.date) years.add(inv.date.substring(0, 4)) });
-        (expenses||[]).forEach(exp => { if(exp?.date) years.add(exp.date.substring(0, 4)) });
+        const years = new Set([currentYearStr, lapYear]);
+        [...(invoices||[]), ...(expenses||[]), ...(assets||[]), ...(cashTx||[])].forEach(x => { if (x?.date) years.add(x.date.substring(0, 4)); });
         return Array.from(years).sort((a, b) => parseInt(b) - parseInt(a));
-      }, [invoices, expenses, currentYearStr]);
+      }, [invoices, expenses, assets, cashTx, currentYearStr, lapYear]);
 
+      // Grafik: penjualan bersih (DPP, tanpa PPN) per bulan — tahun laporan vs tahun sebelumnya
       const monthlyRevenueData = useMemo(() => {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
         const data = months.map(m => ({ month: m, curr: 0, prev: 0 }));
+        const yc = String(lapYear), yp = String(Number(lapYear) - 1);
         (invoices||[]).forEach(inv => {
-          if(!inv?.date) return;
-          const date = new Date(inv.date);
-          if (date.getFullYear().toString() === currentYearStr) data[date.getMonth()].curr += (inv.total || 0);
-          else if (date.getFullYear().toString() === prevYearStr) data[date.getMonth()].prev += (inv.total || 0);
+          if (!inv?.date) return;
+          const y = inv.date.substring(0, 4), m = Number(inv.date.substring(5, 7)) - 1;
+          if (m < 0 || m > 11) return;
+          if (y === yc) data[m].curr += num(inv.subtotal);
+          else if (y === yp) data[m].prev += num(inv.subtotal);
         });
         return data;
-      }, [invoices]);
+      }, [invoices, lapYear]);
 
       const maxChartValue = Math.max(...monthlyRevenueData.flatMap(d => [d.curr, d.prev]), 10000000);
-
-      const singleYearTaxReport = useMemo(() => {
-        let pendapatan = 0, ppn = 0, hpp = 0, operasional = 0;
-        (invoices||[]).forEach(inv => {
-          if (inv?.usePpn && inv?.date?.substring(0, 4) === selectedTaxYear) {
-            pendapatan += (inv.subtotal || 0); ppn += (inv.ppn || 0);
-          }
-        });
-        (expenses||[]).forEach(exp => {
-          if (exp?.date?.substring(0, 4) === selectedTaxYear) {
-            if (exp.category === 'HPP') hpp += (exp.amount || 0);
-            else if (exp.category === 'Operasional') operasional += (exp.amount || 0);
-          }
-        });
-        const labaBruto = pendapatan - hpp;
-        return { year: selectedTaxYear, pendapatan, ppn, hpp, operasional, labaBruto, GridNeto: labaBruto - operasional };
-      }, [invoices, expenses, selectedTaxYear]);
 
       const calendarEvents = useMemo(() => {
         const events = {};
@@ -1018,6 +1244,15 @@
         if (data.expenses && Array.isArray(data.expenses)) setExpenses(data.expenses);
         if (data.suratJalan && Array.isArray(data.suratJalan)) setSuratJalan(data.suratJalan);
         if (data.kwitansi && Array.isArray(data.kwitansi)) setKwitansi(data.kwitansi);
+        if (data.assets && Array.isArray(data.assets)) setAssets(data.assets);
+        if (data.cashTx && Array.isArray(data.cashTx)) setCashTx(data.cashTx);
+        setLedger(normalizeLedger(data.ledger));
+      };
+
+      // Bentuk data yang disimpan (urutan kunci tetap, agar perbandingan "ada perubahan" akurat)
+      const normalizeDb = (data) => {
+        const arr = (x) => Array.isArray(x) ? x : [];
+        return { penawaran: arr(data.penawaran), invoices: arr(data.invoices), expenses: arr(data.expenses), suratJalan: arr(data.suratJalan), kwitansi: arr(data.kwitansi), assets: arr(data.assets), cashTx: arr(data.cashTx), ledger: normalizeLedger(data.ledger) };
       };
 
       // --- API (GitHub Pages -> Google Apps Script Web App) ---
@@ -1089,7 +1324,7 @@
 
       useEffect(() => {
         if (!isDataLoaded || !saveAllowedRef.current) return;
-        const dataToSave = { penawaran, invoices, expenses, suratJalan, kwitansi };
+        const dataToSave = { penawaran, invoices, expenses, suratJalan, kwitansi, assets, cashTx, ledger };
         if (isAPI && JSON.stringify(dataToSave) === lastSavedRef.current) { setIsSyncing(false); return; } // tidak ada perubahan
         setIsSyncing(true);
         const timeoutId = setTimeout(() => {
@@ -1106,16 +1341,18 @@
           }
         }, 1500);
         return () => clearTimeout(timeoutId);
-      }, [penawaran, invoices, expenses, suratJalan, kwitansi, isDataLoaded]);
+      }, [penawaran, invoices, expenses, suratJalan, kwitansi, assets, cashTx, ledger, isDataLoaded]);
 
       const handleDownloadPDF = () => {
         const element = document.getElementById('print-container');
         if (!element) return;
 
         setIsGeneratingPDF(true);
-        const fileName = printData.item && !Array.isArray(printData.item)
-            ? `${printData.item.id.replace(/\//g, '-')}.pdf`
-            : `Dokumen_${printData.type}_Kolektif.pdf`;
+        const fileName = printData.type === 'lapkeu'
+            ? `Laporan_Keuangan_${printData.item?.year || ''}_PT_Nuri_Vira_Pratama.pdf`
+            : (printData.item && !Array.isArray(printData.item) && printData.item.id)
+              ? `${String(printData.item.id).replace(/\//g, '-')}.pdf`
+              : `Dokumen_${printData.type}_Kolektif.pdf`;
 
         const opt = {
           margin:       [12, 12, 12, 12],
@@ -1166,8 +1403,7 @@
             try { data = typeof r.data === 'string' ? JSON.parse(r.data) : r.data; }
             catch (e) { setLoginError('Data di Google Drive tidak dapat dibaca. Hubungi admin.'); return; }
           }
-          const arr = (x) => Array.isArray(x) ? x : [];
-          lastSavedRef.current = JSON.stringify({ penawaran: arr(data.penawaran), invoices: arr(data.invoices), expenses: arr(data.expenses), suratJalan: arr(data.suratJalan), kwitansi: arr(data.kwitansi) });
+          lastSavedRef.current = JSON.stringify(normalizeDb(data));
           applyLoadedData(data);
           apiCredsRef.current = creds;
           saveAllowedRef.current = true;
@@ -1195,7 +1431,7 @@
       const handleLogout = async () => {
         if (isAPI && apiCredsRef.current) {
           // Simpan dulu perubahan yang belum terkirim, baru kosongkan data dari memori browser.
-          const pending = { penawaran, invoices, expenses, suratJalan, kwitansi };
+          const pending = { penawaran, invoices, expenses, suratJalan, kwitansi, assets, cashTx, ledger };
           if (saveAllowedRef.current && JSON.stringify(pending) !== lastSavedRef.current) {
             const ok = await saveToServer(pending);
             if (!ok) return; // tetap login agar data tidak hilang
@@ -1204,6 +1440,7 @@
           apiCredsRef.current = null;
           lastSavedRef.current = null;
           setPenawaran([]); setInvoices([]); setExpenses([]); setSuratJalan([]); setKwitansi([]);
+          setAssets([]); setCashTx([]); setLedger(normalizeLedger(null));
           setActiveTab('dashboard');
         }
         setIsLoggedIn(false); setCurrentUser(null); setLoginFormState({ username: '', password: '' });
@@ -1212,15 +1449,19 @@
       const executeDelete = () => {
         if (!deleteConfirm) return;
         const { type, id } = deleteConfirm;
-        if (type === 'penawaran') setPenawaran(renumberDocuments((penawaran||[]).filter(i => i?.id !== id), 'PNW', true));
-        else if (type === 'invoice') setInvoices(renumberDocuments((invoices||[]).filter(i => i?.id !== id), 'INV', true));
-        else if (type === 'sj') setSuratJalan(renumberDocuments((suratJalan||[]).filter(i => i?.id !== id), 'SJ', false));
-        else if (type === 'kwitansi') setKwitansi(renumberDocuments((kwitansi||[]).filter(i => i?.id !== id), 'KWT', false));
+        // Nomor dokumen lain TIDAK digeser — nomor yang dihapus menjadi celah (jejak audit tetap utuh)
+        if (type === 'penawaran') setPenawaran((penawaran||[]).filter(i => i?.id !== id));
+        else if (type === 'invoice') setInvoices((invoices||[]).filter(i => i?.id !== id));
+        else if (type === 'sj') setSuratJalan((suratJalan||[]).filter(i => i?.id !== id));
+        else if (type === 'kwitansi') setKwitansi((kwitansi||[]).filter(i => i?.id !== id));
         else if (type === 'expense') setExpenses((expenses||[]).filter(i => i?.id !== id));
+        else if (type === 'asset') setAssets((assets||[]).filter(i => i?.id !== id));
+        else if (type === 'cashTx') setCashTx((cashTx||[]).filter(i => i?.id !== id));
         setDeleteConfirm(null);
       };
 
       const handleEdit = (type, item) => {
+        setFormError('');
         setEditingId(item.id);
         if (type === 'penawaran') { setPenawaranForm({...emptyPenawaranForm, ...item, items: item.items||[]}); setPenawaranModalOpen(true); }
         else if (type === 'invoice') { setInvoiceForm({...emptyInvoiceForm, ...item, items: item.items||[]}); setInvoiceModalOpen(true); }
@@ -1230,6 +1471,7 @@
       };
 
       const openNewModal = (type) => {
+        setFormError('');
         setEditingId(null);
         if (type === 'penawaran') { setPenawaranForm(emptyPenawaranForm); setPenawaranModalOpen(true); }
         else if (type === 'invoice') { setInvoiceForm(emptyInvoiceForm); setInvoiceModalOpen(true); }
@@ -1238,48 +1480,101 @@
         else if (type === 'expense') { setExpenseForm(emptyExpenseForm); setExpenseModalOpen(true); }
       };
 
+      // Hitung nilai dokumen penjualan: PPN = 12% × DPP nilai lain (11/12), dibulatkan ke rupiah
+      const hitungNilaiDokumen = (form) => {
+        const subtotal = (form.items||[]).reduce((sum, item) => sum + (num(item?.qty) * num(item?.price)), 0);
+        if (form.usePpn) return hitungPPN(subtotal);
+        return { subtotal: rp(subtotal), dppNilaiLain: 0, ppn: 0, total: rp(subtotal) };
+      };
+      const validasiItem = (form, label) => {
+        if (!form.date) return `Tanggal ${label} wajib diisi.`;
+        if (!String(form.customer || '').trim()) return 'Nama pelanggan wajib diisi.';
+        const items = (form.items || []).filter(it => String(it?.desc || '').trim());
+        if (!items.length) return 'Tambahkan minimal satu baris barang/jasa.';
+        if (items.some(it => !(num(it.qty) > 0) || num(it.price) < 0)) return 'Qty harus lebih dari 0 dan harga tidak boleh negatif.';
+        return '';
+      };
+
       const handleSavePenawaran = () => {
-        const subtotal = (penawaranForm.items||[]).reduce((sum, item) => sum + ((item?.qty||0) * (item?.price||0)), 0);
-        const ppn = penawaranForm.usePpn ? subtotal * 0.11 : 0;
-        const total = subtotal + ppn;
-        const completeItem = { ...penawaranForm, subtotal, ppn, total };
-        let newArray = editingId ? (penawaran||[]).map(p => p?.id === editingId ? { ...completeItem, id: p.id } : p) : [...(penawaran||[]), { ...completeItem, id: 'temp' }];
-        setPenawaran(renumberDocuments(newArray, 'PNW', true));
+        const err = validasiItem(penawaranForm, 'penawaran'); if (err) { setFormError(err); return; }
+        const completeItem = { ...penawaranForm, items: (penawaranForm.items||[]).filter(it => String(it?.desc || '').trim()), ...hitungNilaiDokumen(penawaranForm) };
+        const id = editingId ? keepOrRenumber(penawaran, 'PNW', true, editingId, completeItem) : nextDocNumber(penawaran, 'PNW', true, completeItem);
+        const newArray = editingId ? (penawaran||[]).map(p => p?.id === editingId ? { ...completeItem, id } : p) : [...(penawaran||[]), { ...completeItem, id }];
+        setPenawaran(sortByDateDesc(newArray));
         setPenawaranModalOpen(false);
       };
 
       const handleSaveInvoice = () => {
-        const subtotal = (invoiceForm.items||[]).reduce((sum, item) => sum + ((item?.qty||0) * (item?.price||0)), 0);
-        const ppn = invoiceForm.usePpn ? subtotal * 0.11 : 0;
-        const total = subtotal + ppn;
-        const completeItem = { ...invoiceForm, subtotal, ppn, total };
-        let newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? { ...completeItem, id: i.id } : i) : [...(invoices||[]), { ...completeItem, id: 'temp' }];
-        setInvoices(renumberDocuments(newArray, 'INV', true));
+        const err = validasiItem(invoiceForm, 'invoice'); if (err) { setFormError(err); return; }
+        if (invoiceForm.paidDate && invoiceForm.paidDate < invoiceForm.date) { setFormError('Tanggal pelunasan tidak boleh sebelum tanggal invoice.'); return; }
+        const completeItem = { ...invoiceForm, items: (invoiceForm.items||[]).filter(it => String(it?.desc || '').trim()), ...hitungNilaiDokumen(invoiceForm) };
+        const id = editingId ? keepOrRenumber(invoices, 'INV', true, editingId, completeItem) : nextDocNumber(invoices, 'INV', true, completeItem);
+        const newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? { ...completeItem, id } : i) : [...(invoices||[]), { ...completeItem, id }];
+        setInvoices(sortByDateDesc(newArray));
         setInvoiceModalOpen(false);
       };
 
+      const markInvoicePaid = (inv, date) => {
+        setInvoices((invoices||[]).map(i => i?.id === inv.id ? { ...i, paidDate: date ? maxDate(i.date, date) : '' } : i));
+      };
+      const bulkMarkPaid = (until) => {
+        if (!until) return;
+        setInvoices((invoices||[]).map(i => (i && i.date && !i.paidDate && i.date <= until) ? { ...i, paidDate: i.date } : i));
+      };
+
       const handleSaveSJ = () => {
-        let newArray = editingId ? (suratJalan||[]).map(s => s?.id === editingId ? { ...sjForm, id: s.id } : s) : [...(suratJalan||[]), { ...sjForm, id: 'temp' }];
-        setSuratJalan(renumberDocuments(newArray, 'SJ', false));
+        if (!sjForm.date) { setFormError('Tanggal pengiriman wajib diisi.'); return; }
+        const id = editingId ? keepOrRenumber(suratJalan, 'SJ', false, editingId, sjForm) : nextDocNumber(suratJalan, 'SJ', false, sjForm);
+        const newArray = editingId ? (suratJalan||[]).map(s => s?.id === editingId ? { ...sjForm, id } : s) : [...(suratJalan||[]), { ...sjForm, id }];
+        setSuratJalan(sortByDateDesc(newArray));
         setSJModalOpen(false);
       };
 
       const handleSaveKwitansi = () => {
-        const completeItem = { ...kwitansiForm, amount: Number(kwitansiForm.amount) || 0 };
-        let newArray = editingId ? (kwitansi||[]).map(k => k?.id === editingId ? { ...completeItem, id: k.id } : k) : [...(kwitansi||[]), { ...completeItem, id: 'temp' }];
-        setKwitansi(renumberDocuments(newArray, 'KWT', false));
+        if (!kwitansiForm.date) { setFormError('Tanggal kwitansi wajib diisi.'); return; }
+        if (!(num(kwitansiForm.amount) > 0)) { setFormError('Jumlah uang harus lebih dari 0.'); return; }
+        const completeItem = { ...kwitansiForm, amount: rp(kwitansiForm.amount) };
+        const id = editingId ? keepOrRenumber(kwitansi, 'KWT', false, editingId, completeItem) : nextDocNumber(kwitansi, 'KWT', false, completeItem);
+        const newArray = editingId ? (kwitansi||[]).map(k => k?.id === editingId ? { ...completeItem, id } : k) : [...(kwitansi||[]), { ...completeItem, id }];
+        setKwitansi(sortByDateDesc(newArray));
         setKwitansiModalOpen(false);
       };
 
       const handleSaveExpense = () => {
-        const completeItem = { ...expenseForm, amount: Number(expenseForm.amount) || 0 };
-        if (editingId) { setExpenses((expenses||[]).map(e => e?.id === editingId ? { ...completeItem, id: e.id } : e)); }
+        if (!expenseForm.date) { setFormError('Tanggal wajib diisi.'); return; }
+        if (!String(expenseForm.desc || '').trim()) { setFormError('Deskripsi beban wajib diisi.'); return; }
+        if (!(num(expenseForm.amount) > 0)) { setFormError('Nominal harus lebih dari 0.'); return; }
+        if (num(expenseForm.ppnMasukan) < 0) { setFormError('PPN masukan tidak boleh negatif.'); return; }
+        const isUtang = expenseForm.paymentStatus === 'utang';
+        if (isUtang && expenseForm.paidDate && expenseForm.paidDate < expenseForm.date) { setFormError('Tanggal pelunasan tidak boleh sebelum tanggal beban.'); return; }
+        const completeItem = { ...expenseForm, amount: rp(expenseForm.amount), ppnMasukan: rp(expenseForm.ppnMasukan), paymentStatus: isUtang ? 'utang' : 'lunas', paidDate: isUtang ? (expenseForm.paidDate || '') : '', nonDeductible: !!expenseForm.nonDeductible };
+        if (editingId) { setExpenses(sortByDateDesc((expenses||[]).map(e => e?.id === editingId ? { ...completeItem, id: e.id } : e))); }
         else {
-          const newId = `EXP-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
-          setExpenses([{ ...completeItem, id: newId }, ...(expenses||[])].sort((a,b) => new Date(b?.date||0) - new Date(a?.date||0)));
+          const newId = `EXP-${Date.now().toString(36).toUpperCase()}`;   // unik (dulu acak 4 digit, bisa bentrok)
+          setExpenses(sortByDateDesc([{ ...completeItem, id: newId }, ...(expenses||[])]));
         }
         setExpenseModalOpen(false);
       };
+
+      // Aset tetap & transaksi kas lain
+      const handleAddAsset = () => {
+        if (!assetForm.date || !String(assetForm.name).trim() || !(num(assetForm.cost) > 0)) { setFormError('Lengkapi tanggal perolehan, nama aset, dan harga perolehan.'); return; }
+        setFormError('');
+        setAssets(sortByDateDesc([...(assets||[]), { ...assetForm, cost: rp(assetForm.cost), id: `AST-${Date.now().toString(36).toUpperCase()}` }]));
+        setAssetForm(emptyAssetForm);
+      };
+      const handleAddCash = () => {
+        if (!cashForm.date || !JENIS_KAS[cashForm.type] || !(num(cashForm.amount) > 0)) { setFormError('Lengkapi tanggal, jenis, dan jumlah transaksi kas.'); return; }
+        setFormError('');
+        setCashTx(sortByDateDesc([...(cashTx||[]), { ...cashForm, amount: rp(cashForm.amount), id: `KAS-${Date.now().toString(36).toUpperCase()}` }]));
+        setCashForm(emptyCashForm);
+      };
+      const setOpening = (k, v) => setLedger(l => ({ ...l, opening: { ...l.opening, [k]: num(v) } }));
+      const setClosingInventory = (y, v) => setLedger(l => {
+        const ci = { ...l.closingInventory };
+        if (v === '' || v === null) delete ci[y]; else ci[y] = num(v);
+        return { ...l, closingInventory: ci };
+      });
 
       const handlePrintAllPenawaran = (downloadPdf = false) => {
         let filtered = penawaran || [];
@@ -1297,7 +1592,7 @@
 
       // --- BACKUP & PULIHKAN DATA (file JSON) ---
       const handleBackup = (label) => {
-        const data = { penawaran, invoices, expenses, suratJalan, kwitansi };
+        const data = { penawaran, invoices, expenses, suratJalan, kwitansi, assets, cashTx, ledger };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1332,6 +1627,7 @@
         handleBackup('sebelum-pulihkan'); // cadangan otomatis data saat ini
         setPenawaran(arr(d.penawaran)); setInvoices(arr(d.invoices)); setExpenses(arr(d.expenses));
         setSuratJalan(arr(d.suratJalan)); setKwitansi(arr(d.kwitansi));
+        setAssets(arr(d.assets)); setCashTx(arr(d.cashTx)); setLedger(normalizeLedger(d.ledger));
         saveAllowedRef.current = true;
         setLoadError('');
         setRestorePreview(null);
@@ -1411,7 +1707,31 @@
       // === TAMPILAN KHUSUS CETAK & PDF ===
       if (printData) {
         const { type, item } = printData;
-        if (type === 'tax_report') {
+        if (type === 'lapkeu') {
+          const R = item, lr = R.lr, A = R.aset, Lb = R.liabilitas, E = R.ekuitas;
+          const row = (label, value, o = {}) => (
+            <tr key={label} className={`${o.total ? 'font-bold border-t border-slate-400' : ''} ${o.grand ? 'font-black border-t-2 border-slate-900 bg-slate-50' : ''}`}>
+              <td className={`py-1 ${o.indent ? 'pl-4' : 'pl-1'}`}>{label}</td>
+              <td className="py-1 pr-1 text-right whitespace-nowrap">{o.neg ? paren(value) : formatIDR(value)}</td>
+            </tr>
+          );
+          const head = (label) => <tr key={'h' + label}><td colSpan="2" className="pt-3 pb-0.5 pl-1 font-black uppercase tracking-wider text-[9px] text-slate-600">{label}</td></tr>;
+          const kop = (judul) => (
+            <div className="flex justify-between items-center border-b-[3px] border-slate-900 pb-3 mb-4">
+              <div className="w-[70%] flex items-center gap-4">
+                <img src={LOGO_URL} alt="Logo" className="w-14 h-14 object-contain shrink-0" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
+                <div>
+                  <h1 className="text-lg font-black text-slate-900 leading-tight">PT NURI VIRA PRATAMA</h1>
+                  <p className="text-[9px] text-slate-600 font-medium mt-0.5">{COMPANY.address}</p>
+                  <p className="text-[9px] text-slate-600 font-medium">Telp: {COMPANY.phone} | Email: {COMPANY.email}</p>
+                </div>
+              </div>
+              <div className="w-[30%] text-right"><h2 className="text-sm font-black text-slate-400 leading-tight">{judul}</h2><p className="text-[10px] font-bold text-slate-700">Tahun buku {R.year}</p></div>
+            </div>
+          );
+          const ttd = (
+            <div className="mt-8 flex justify-end avoid-break text-[11px]"><div className="text-center w-48"><p className="mb-12 text-slate-500">Jakarta, ........................</p><p className="font-bold border-b border-slate-800 pb-0.5">&nbsp;</p><p className="text-[9px] text-slate-500 font-bold mt-1 uppercase tracking-wider">Direktur</p></div></div>
+          );
           return (
             <div className="min-h-screen bg-slate-200 py-8 font-sans relative">
               {isGeneratingPDF && (
@@ -1427,42 +1747,96 @@
                   <button onClick={() => window.print()} className="px-6 py-2.5 bg-blue-700 text-white font-bold rounded-xl flex items-center gap-2 shadow-md"><IconPrinter size={18} /> Cetak</button>
                 </div>
               </div>
+              <div id="print-container" className="bg-transparent">
+                <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                  {kop('LAPORAN LABA RUGI')}
+                  <p className="text-center font-bold mb-2">Periode 1 Januari – 31 Desember {R.year}</p>
+                  <table className="w-full"><tbody>
+                    {head('Pendapatan usaha')}
+                    {row('Penjualan kena PPN (DPP)', lr.penjualanPPN, { indent: true })}
+                    {row('Penjualan tidak dipungut PPN', lr.penjualanNonPPN, { indent: true })}
+                    {row('Jumlah pendapatan usaha', lr.pendapatanUsaha, { total: true })}
+                    {head('Harga pokok penjualan')}
+                    {row('Persediaan awal', lr.persAwal, { indent: true })}
+                    {row('Pembelian', lr.pembelian, { indent: true })}
+                    {row('Persediaan akhir', lr.persAkhir, { indent: true, neg: true })}
+                    {row('Jumlah harga pokok penjualan', lr.hpp, { total: true, neg: true })}
+                    {row('Laba kotor', lr.labaKotor, { total: true })}
+                    {head('Beban usaha')}
+                    {row('Beban operasional', lr.bebanOperasional, { indent: true })}
+                    {row('Beban penyusutan', lr.penyusutan, { indent: true })}
+                    {row('Jumlah beban usaha', lr.bebanOperasional + lr.penyusutan, { total: true, neg: true })}
+                    {row('Laba usaha', lr.labaUsaha, { total: true })}
+                    {head('Pendapatan lain-lain')}
+                    {row('Pendapatan lain-lain', lr.pendapatanLain, { indent: true })}
+                    {row('Bunga / jasa giro bank', lr.bungaBank, { indent: true })}
+                    {row('Laba sebelum pajak', lr.labaSebelumPajak, { total: true })}
+                    {row('Beban pajak penghasilan', lr.bebanPajak, { indent: true, neg: true })}
+                    {row('LABA BERSIH TAHUN BERJALAN', lr.labaBersih, { grand: true })}
+                  </tbody></table>
+                  {ttd}
+                </div>
 
-              <div id="print-container" className="bg-white print-area">
-                <div className="max-w-4xl mx-auto p-4 text-slate-800 bg-white">
-                  <div className="flex justify-between items-center border-b-[3px] border-slate-900 pb-3 mb-4">
-                    <div className="w-[65%] flex items-center gap-4">
-                      <img src={LOGO_URL} alt="Logo" className="w-16 h-16 object-contain shrink-0" onError={(e) => { e.target.onerror = null; e.target.src = LOGO_FALLBACK; }} />
-                      <div>
-                        <h1 className="text-xl font-black text-slate-900 leading-tight">PT NURI VIRA PRATAMA</h1>
-                        <p className="text-[10px] text-slate-800 font-bold uppercase tracking-wider mt-0.5">Suplier Peralatan Proteksi Kebakaran dan Sertifikasi</p>
-                        <p className="text-[9px] text-slate-600 font-medium mt-1">Jln. Raya Penggilingan, Komp. Pasar Lama Komarudin, Kec. Cakung , Jakarta Timur</p>
-                        <p className="text-[9px] text-slate-600 font-medium">Telp : 0856-7725-758 | Email : ptnurivirapratama@gmail.com</p>
-                      </div>
-                    </div>
-                    <div className="w-[35%] text-right"><h2 className="text-lg font-black text-slate-300">LAPORAN SPT</h2></div>
+                <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                  {kop('LAPORAN POSISI KEUANGAN')}
+                  <p className="text-center font-bold mb-2">Per 31 Desember {R.year}</p>
+                  <div className="grid grid-cols-2 gap-6">
+                    <table className="w-full"><tbody>
+                      {head('Aset lancar')}
+                      {row('Kas dan bank', A.kas, { indent: true })}
+                      {row('Piutang usaha', A.piutang, { indent: true })}
+                      {row('Persediaan', A.persediaan, { indent: true })}
+                      {A.ppnLebihBayar > 0 && row('PPN lebih bayar', A.ppnLebihBayar, { indent: true })}
+                      {A.pphLebihBayar > 0 && row('PPh lebih bayar', A.pphLebihBayar, { indent: true })}
+                      {row('Jumlah aset lancar', A.lancar, { total: true })}
+                      {head('Aset tetap')}
+                      {row('Harga perolehan', A.hargaPerolehan, { indent: true })}
+                      {row('Akumulasi penyusutan', A.akumulasi, { indent: true, neg: true })}
+                      {row('Nilai buku', A.asetTetapNeto, { total: true })}
+                      {row('JUMLAH ASET', A.total, { grand: true })}
+                    </tbody></table>
+                    <table className="w-full"><tbody>
+                      {head('Liabilitas')}
+                      {row('Utang usaha', Lb.utangUsaha, { indent: true })}
+                      {row('Utang PPN', Lb.utangPPN, { indent: true })}
+                      {row('Utang PPh Badan', Lb.utangPPh, { indent: true })}
+                      {row('Utang pinjaman', Lb.pinjaman, { indent: true })}
+                      {row('Jumlah liabilitas', Lb.total, { total: true })}
+                      {head('Ekuitas')}
+                      {row('Modal disetor', E.modal, { indent: true })}
+                      {row('Saldo laba awal tahun', E.saldoLabaAwalTahun, { indent: true })}
+                      {row('Laba tahun berjalan', E.labaTahunBerjalan, { indent: true })}
+                      {row('Prive / dividen', E.priveTahunIni, { indent: true, neg: true })}
+                      {row('Jumlah ekuitas', E.total, { total: true })}
+                      {row('JUMLAH LIABILITAS & EKUITAS', Lb.total + E.total, { grand: true })}
+                    </tbody></table>
                   </div>
-                  <div className="mb-4 text-center">
-                    <h3 className="font-black text-base text-slate-900">LAMPIRAN I - PENGHITUNGAN PENGHASILAN NETO KOMERSIAL</h3>
-                    <p className="text-[11px] font-bold text-blue-800 mt-0.5">TAHUN PAJAK: {item.year}</p>
-                  </div>
-                  <table className="w-full text-left mb-4 border-collapse text-[11px]">
-                    <thead className="border-y-2 border-slate-900 bg-slate-50">
-                      <tr><th className="py-1.5 px-2 font-bold w-10 text-center">No.</th><th className="py-1.5 px-2 font-bold">Elemen Keuangan</th><th className="py-1.5 px-2 font-bold text-right w-48">Nominal Rupiah (Rp)</th></tr>
-                    </thead>
+                  {ttd}
+                </div>
+
+                <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                  {kop('PERHITUNGAN PAJAK')}
+                  <p className="font-black uppercase tracking-wider text-[10px] mb-1">A. PPN tahun {R.year}</p>
+                  <table className="w-full mb-4">
+                    <thead><tr className="border-y-2 border-slate-900 bg-slate-50"><th className="py-1 pl-1 text-left">Masa</th><th className="text-right">DPP</th><th className="text-right">Keluaran</th><th className="text-right">Masukan</th><th className="text-right pr-1">Kurang/(lebih) bayar</th></tr></thead>
                     <tbody className="divide-y divide-slate-200">
-                      <tr className="avoid-break"><td className="py-2 px-2 text-center">1</td><td className="py-2 px-2 font-medium">Peredaran Usaha (Pendapatan Resmi)</td><td className="py-2 px-2 text-right font-bold text-slate-800">{formatIDR(item.pendapatan)}</td></tr>
-                      <tr className="avoid-break"><td className="py-2 px-2 text-center">2</td><td className="py-2 px-2 font-medium">Harga Pokok Penjualan (HPP)</td><td className="py-2 px-2 text-right text-rose-600 font-bold">({formatIDR(item.hpp)})</td></tr>
-                      <tr className="bg-slate-50 font-bold border-y-2 avoid-break"><td className="py-2 px-2 text-center">3</td><td className="py-2 px-2">Laba Bruto (1 - 2)</td><td className="py-2 px-2 text-right text-blue-700">{formatIDR(item.labaBruto)}</td></tr>
-                      <tr className="avoid-break"><td className="py-2 px-2 text-center">4</td><td className="py-2 px-2 font-medium">Biaya Usaha Lainnya (Operasional)</td><td className="py-2 px-2 text-right text-rose-600 font-bold">({formatIDR(item.operasional)})</td></tr>
-                      <tr className="border-y-2 border-slate-900 bg-emerald-50/50 font-bold avoid-break"><td className="py-3 px-2 text-center">5</td><td className="py-3 px-2">Penghasilan Neto Komersial (3 - 4)</td><td className={`py-3 px-2 text-right text-sm ${item.GridNeto >= 0 ? 'text-emerald-700':'text-rose-700'}`}>{formatIDR(item.GridNeto)}</td></tr>
+                      {R.ppnMasa.map(m => <tr key={m.bulan}><td className="py-0.5 pl-1">{BULAN[m.bulan]}</td><td className="text-right">{formatIDR(m.dpp)}</td><td className="text-right">{formatIDR(m.keluaran)}</td><td className="text-right">{formatIDR(m.masukan)}</td><td className="text-right pr-1">{m.kurangBayar < 0 ? paren(m.kurangBayar) : formatIDR(m.kurangBayar)}</td></tr>)}
                     </tbody>
                   </table>
-                  <div className="text-[10px] text-slate-600 bg-slate-50 p-3 rounded-lg border avoid-break">
-                    <p className="font-bold text-slate-800 mb-1">Informasi Tambahan:</p>
-                    <p className="font-semibold">Total PPN Keluaran (11%) Terpungut: <span className="text-slate-900 font-bold text-xs ml-1">{formatIDR(item.ppn)}</span></p>
-                  </div>
-                  <div className="mt-8 flex justify-end avoid-break"><div className="text-center w-40 border-b border-slate-400 pb-1 text-[11px] font-bold text-slate-800 uppercase tracking-wider">Direktur Keuangan</div></div>
+                  <p className="font-black uppercase tracking-wider text-[10px] mb-1">B. PPh Badan tahun {R.year}</p>
+                  <table className="w-full"><tbody>
+                    {row('Peredaran bruto', lr.peredaranBruto)}
+                    {R.scheme === 'umum' && <>
+                      {row('Laba sebelum pajak (komersial)', lr.labaSebelumPajak)}
+                      {row('Koreksi fiskal positif', lr.koreksiPositif, { indent: true })}
+                      {row('Koreksi fiskal negatif', lr.koreksiNegatif, { indent: true, neg: true })}
+                      {row('Penghasilan neto fiskal', lr.penghasilanNetoFiskal, { total: true })}
+                      {row('Penghasilan Kena Pajak', lr.pkp, { total: true })}
+                    </>}
+                    {row('PPh Badan terutang', lr.pph.pph, { grand: true })}
+                  </tbody></table>
+                  <p className="mt-2 text-[9px] text-slate-500">Metode: {lr.pph.metode}. Estimasi berdasarkan data portal; bukan pengganti SPT resmi.</p>
+                  {ttd}
                 </div>
               </div>
             </div>
@@ -1529,7 +1903,7 @@
                         <div className="w-1/2 text-right">
                           <p><span className="text-slate-400 uppercase text-[9px] mr-2">Tanggal:</span>{doc?.date}</p>
                           {type==='penawaran' && <p><span className="text-slate-400 uppercase text-[9px] mr-2">Berlaku s/d:</span>{doc?.validUntil}</p>}
-                          <p><span className="text-slate-400 uppercase text-[9px] mr-2">Pajak:</span>{doc?.usePpn ? 'Termasuk PPN 11%' : 'Non-PPN'}</p>
+                          <p><span className="text-slate-400 uppercase text-[9px] mr-2">Pajak:</span>{doc?.usePpn ? 'PPN 12% × DPP Nilai Lain' : 'Tidak dipungut PPN'}</p>
                         </div>
                       </div>
 
@@ -1548,8 +1922,9 @@
 
                       <div className="flex justify-end mb-4 avoid-break">
                         <div className="w-64 space-y-1 bg-slate-50 p-3 rounded-lg border text-[11px]">
-                          <div className="flex justify-between font-semibold"><span className="text-slate-500">Subtotal (DPP)</span><span>{formatIDR(doc?.subtotal)}</span></div>
-                          {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">PPN (11%)</span><span>{formatIDR(doc?.ppn)}</span></div>}
+                          <div className="flex justify-between font-semibold"><span className="text-slate-500">Harga Jual</span><span>{formatIDR(doc?.subtotal)}</span></div>
+                          {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">DPP Nilai Lain (11/12)</span><span>{formatIDR(doc?.dppNilaiLain || Math.round(num(doc?.subtotal) * 11 / 12))}</span></div>}
+                          {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">PPN 12%</span><span>{formatIDR(doc?.ppn)}</span></div>}
                           <div className="flex justify-between font-black border-t pt-1.5 mt-1.5 text-[13px] text-blue-700"><span>Total Akhir</span><span>{formatIDR(doc?.total)}</span></div>
                         </div>
                       </div>
@@ -1632,68 +2007,83 @@
       }
 
       // --- 3. MAIN RENDER TAB SCREENS ---
-      const renderDashboard = () => (
+      // Baris tabel laporan (dipakai dasbor, tab laporan, dan cetak)
+      const lrRow = (label, value, o = {}) => (
+        <tr key={label} className={`${o.total ? 'border-t border-slate-300 font-bold text-slate-900' : 'text-slate-700'} ${o.grand ? 'border-t-2 border-slate-900 bg-slate-50' : ''}`}>
+          <td className={`py-2 ${o.indent ? 'pl-5' : 'pl-1'} ${o.grand ? 'font-black py-3' : ''}`}>{label}{o.note && <span className="block text-[11px] text-slate-400 font-medium">{o.note}</span>}</td>
+          <td className={`py-2 pr-1 text-right tabular-nums whitespace-nowrap ${o.neg ? 'text-rose-600' : ''} ${o.grand ? 'font-black py-3 ' + (value >= 0 ? 'text-emerald-700' : 'text-rose-700') : ''}`}>{o.neg ? paren(value) : formatIDR(value)}</td>
+        </tr>
+      );
+      const lrHead = (label) => (<tr key={'h-' + label}><td colSpan="2" className="pt-5 pb-1 pl-1 text-[11px] font-black uppercase tracking-widest text-slate-500">{label}</td></tr>);
+      const yearSelect = (cls = '') => (
+        <select value={lapYear} onChange={(e) => setLapYear(e.target.value)} className={`border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold bg-white text-slate-700 cursor-pointer outline-none focus:ring-2 focus:ring-slate-400 ${cls}`}>
+          {availableYears.map(y => <option key={y} value={y}>Tahun {y}</option>)}
+        </select>
+      );
+
+      const renderDashboard = () => {
+        const R = ledgerResult, lr = R.lr;
+        const bebanTotal = lr.hpp + lr.bebanOperasional + lr.penyusutan;
+        const ppnTahun = R.ppnMasa.reduce((a, m) => ({ k: a.k + m.keluaran, m: a.m + m.masukan }), { k: 0, m: 0 });
+        const card = (title, value, sub, tone, Icon) => (
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">{title}</h3>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tone}`}><Icon size={20} /></div>
+            </div>
+            <div className={`mt-5 text-2xl xl:text-3xl font-extrabold tabular-nums ${value < 0 ? 'text-rose-600' : 'text-slate-800'}`}>{formatIDR(value)}</div>
+            <p className="text-xs font-medium text-slate-400 mt-2">{sub}</p>
+          </div>
+        );
+        return (
         <div className="space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
-              <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-5 text-blue-600 group-hover:scale-110 transition-transform duration-500"><IconWallet size={120} /></div>
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 relative z-10">
-                <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">Total Kas Masuk</h3>
-                <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center"><IconWallet size={20} /></div>
-              </div>
-              <div className="mt-5 text-3xl font-extrabold text-slate-800 relative z-10">{formatIDR(totalKasMasuk)}</div>
-              <p className="text-xs font-medium text-slate-400 mt-2 relative z-10">Omzet Kotor (PPN & Non-PPN)</p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Ringkasan Keuangan</h2>
+              <p className="text-sm text-slate-500 mt-1">Basis akrual · seluruh penjualan (PPN &amp; non-PPN) · tahun buku {lapYear}</p>
             </div>
+            {yearSelect()}
+          </div>
 
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
-              <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-5 text-rose-600 group-hover:scale-110 transition-transform duration-500"><IconTrendingDown size={120} /></div>
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 relative z-10">
-                <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">Arus Kas Keluar</h3>
-                <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center"><IconTrendingDown size={20} /></div>
-              </div>
-              <div className="mt-5 text-3xl font-extrabold text-slate-800 relative z-10">{formatIDR(totalHPP + totalOperasional)}</div>
-              <p className="text-xs font-medium text-slate-400 mt-2 relative z-10">HPP & Biaya Operasional</p>
+          {R.peringatan.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-sm space-y-1">
+              {R.peringatan.map((t, k) => <div key={k} className="flex items-start gap-2"><IconAlertCircle size={16}/> <span>{t}</span></div>)}
+              <button onClick={() => { setActiveTab('laporan'); setLapTab('pengaturan'); }} className="mt-2 text-xs font-bold underline">Lengkapi di Laporan → Saldo Awal &amp; Data Pendukung</button>
             </div>
+          )}
 
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
-              <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-5 text-emerald-600 group-hover:scale-110 transition-transform duration-500"><IconCalculator size={120} /></div>
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 relative z-10">
-                <h3 className="text-slate-500 font-semibold tracking-wide uppercase text-xs">Laba Bersih Konsolidasi</h3>
-                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center"><IconCalculator size={20} /></div>
-              </div>
-              <div className={`mt-5 text-3xl font-extrabold relative z-10 ${labaBersihKonsolidasi >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {formatIDR(labaBersihKonsolidasi)}
-              </div>
-              <p className="text-xs font-medium text-slate-400 mt-2 relative z-10">Total Omzet Bersih Usaha (Seluruh Invoice)</p>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+            {card(`Pendapatan Usaha ${lapYear}`, lr.pendapatanUsaha, `PPN ${formatIDR(lr.penjualanPPN)} · Non-PPN ${formatIDR(lr.penjualanNonPPN)}`, 'bg-blue-50 text-blue-600', IconWallet)}
+            {card('Total Beban', bebanTotal, 'HPP + operasional + penyusutan', 'bg-rose-50 text-rose-600', IconTrendingDown)}
+            {card('Laba Bersih', lr.labaBersih, 'Setelah estimasi PPh Badan', 'bg-emerald-50 text-emerald-600', IconCalculator)}
+            {card('Kas & Bank', R.aset.kas, `Piutang ${formatIDR(R.aset.piutang)} · per 31 Des ${lapYear}`, 'bg-slate-100 text-slate-700', IconLandmark)}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <IconBarChart2 size={20} className="text-blue-600" /> Analisis Pendapatan Penjualan
+                  <IconBarChart2 size={20} className="text-blue-600" /> Penjualan Bersih per Bulan
                 </h2>
-                <p className="text-sm text-slate-500 mt-1 font-medium">Tren kas masuk kotor (YTD) vs Tahun Lalu.</p>
+                <p className="text-sm text-slate-500 mt-1 font-medium">Nilai invoice sebelum PPN (DPP), {lapYear} vs {Number(lapYear) - 1}.</p>
               </div>
               <div className="flex gap-4 text-xs font-bold uppercase tracking-wider bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-600"></div> {currentYearStr}</div>
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-slate-300"></div> {prevYearStr}</div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-600"></div> {lapYear}</div>
+                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-slate-300"></div> {Number(lapYear) - 1}</div>
               </div>
             </div>
-
-            <div className="h-72 flex items-end gap-2 sm:gap-4 border-b border-slate-200 pb-2 relative w-full overflow-x-auto min-w-[500px]">
+            <div className="overflow-x-auto">
+            <div className="h-72 flex items-end gap-2 sm:gap-4 border-b border-slate-200 pb-2 relative w-full min-w-[500px]">
               <div className="absolute top-0 left-0 w-full h-px bg-slate-100"></div>
               <div className="absolute top-1/4 left-0 w-full h-px bg-slate-100"></div>
               <div className="absolute top-2/4 left-0 w-full h-px bg-slate-100"></div>
               <div className="absolute top-3/4 left-0 w-full h-px bg-slate-100"></div>
-
               {monthlyRevenueData.map((data, idx) => (
                 <div key={idx} className="flex-1 flex flex-col items-center justify-end h-full relative z-10 group cursor-pointer">
                   <div className="opacity-0 group-hover:opacity-100 absolute -top-14 bg-slate-800 text-white text-xs py-2 px-3 rounded-lg shadow-xl whitespace-nowrap transition-opacity pointer-events-none z-20 font-medium">
                     <div className="font-bold text-slate-300 mb-1 border-b border-slate-600 pb-1">{data.month}</div>
-                    <div className="flex justify-between gap-4"><span className="text-blue-300">{currentYearStr}</span> <span>{formatIDR(data.curr)}</span></div>
-                    <div className="flex justify-between gap-4"><span className="text-slate-400">{prevYearStr}</span> <span>{formatIDR(data.prev)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-blue-300">{lapYear}</span> <span>{formatIDR(data.curr)}</span></div>
+                    <div className="flex justify-between gap-4"><span className="text-slate-400">{Number(lapYear) - 1}</span> <span>{formatIDR(data.prev)}</span></div>
                   </div>
                   <div className="flex items-end justify-center w-full gap-1 sm:gap-2 h-full pb-1">
                     <div className="w-1/2 max-w-[24px] bg-slate-200 rounded-t-sm transition-all duration-700" style={{ height: `${(data.prev / maxChartValue) * 100}%`, minHeight: data.prev > 0 ? '4px' : '0' }}></div>
@@ -1703,91 +2093,57 @@
                 </div>
               ))}
             </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-            {/* LAPORAN LABA RUGI TOTAL KONSOLIDASI */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-              <div className="px-6 py-5 border-b border-slate-100 bg-white">
-                <h2 className="text-lg font-bold text-slate-800">Laporan Laba Rugi Keseluruhan (Konsolidasi)</h2>
-                <p className="text-sm text-slate-500 mt-1 font-medium">Penggabungan seluruh peredaran usaha Kena Pajak & Beban Pajak</p>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-start gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Laba Rugi {lapYear}</h2>
+                  <p className="text-sm text-slate-500 mt-1">Ringkasan — rincian lengkap di tab Laporan.</p>
+                </div>
+                <button onClick={() => { setActiveTab('laporan'); setLapTab('labarugi'); }} className="text-sm font-bold text-blue-600 hover:underline whitespace-nowrap">Lihat lengkap →</button>
               </div>
-              <div className="p-6 overflow-x-auto flex-1 bg-slate-50/30">
-                <table className="w-full text-left border-collapse min-w-[400px]">
-                  <tbody>
-                    <tr><td className="py-2.5 font-bold text-slate-800 text-xs tracking-wider uppercase" colSpan="2">Pendapatan Bersih Usaha</td></tr>
-                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Peredaran Usaha Resmi (DPP PPN)</td><td className="py-2.5 text-right text-slate-800 font-semibold">{formatIDR(pendapatanResmiLabaRugi)}</td></tr>
-                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Peredaran Usaha Bebas (Non-PPN)</td><td className="py-2.5 text-right text-slate-800 font-semibold">{formatIDR(pendapatanBebasLabaRugi)}</td></tr>
-                    <tr className="border-t border-slate-200"><td className="py-3 font-bold text-slate-800">Total Omzet Bersih Usaha</td><td className="py-3 text-right font-bold text-slate-800">{formatIDR(totalPendapatanKonsolidasi)}</td></tr>
-
-                    <tr><td className="py-4 font-bold text-slate-800 text-xs tracking-wider uppercase" colSpan="2">Harga Pokok Penjualan (HPP)</td></tr>
-                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Beban Pokok Proyek / Penjualan</td><td className="py-2.5 text-right text-rose-600 font-medium">({formatIDR(totalHPP)})</td></tr>
-                    <tr className="border-t border-slate-200 bg-white"><td className="py-3.5 px-4 rounded-l-lg font-bold text-slate-800">TOTAL LABA BRUTO KONSOLIDASI</td><td className="py-3.5 px-4 rounded-r-lg text-right font-bold text-blue-700">{formatIDR(labaKotorKonsolidasi)}</td></tr>
-
-                    <tr><td className="py-4 font-bold text-slate-800 text-xs tracking-wider uppercase" colSpan="2">Beban Operasional</td></tr>
-                    <tr><td className="py-2.5 pl-4 text-slate-600 text-sm font-medium">Total Beban Usaha Kantor & Gudang</td><td className="py-2.5 text-right text-rose-600 font-medium">({formatIDR(totalOperasional)})</td></tr>
-                    <tr className="border-t-2 border-slate-800 bg-emerald-50/50"><td className="py-4 font-bold text-slate-900 text-base">LABA BERSIH SEBENARNYA (NETO)</td><td className="py-4 text-right font-black text-emerald-700 text-lg">{formatIDR(labaBersihKonsolidasi)}</td></tr>
-                  </tbody>
-                </table>
+              <div className="px-6 pb-6 overflow-x-auto">
+                <table className="w-full text-sm min-w-[360px]"><tbody>
+                  {lrRow('Pendapatan usaha', lr.pendapatanUsaha)}
+                  {lrRow('Harga pokok penjualan', lr.hpp, { neg: true })}
+                  {lrRow('Laba kotor', lr.labaKotor, { total: true })}
+                  {lrRow('Beban usaha (termasuk penyusutan)', lr.bebanOperasional + lr.penyusutan, { neg: true })}
+                  {lrRow('Pendapatan lain-lain', lr.pendapatanLain + lr.bungaBank)}
+                  {lrRow('Laba sebelum pajak', lr.labaSebelumPajak, { total: true })}
+                  {lrRow('Beban PPh Badan (estimasi)', lr.bebanPajak, { neg: true })}
+                  {lrRow('Laba bersih tahun berjalan', lr.labaBersih, { grand: true })}
+                </tbody></table>
               </div>
             </div>
 
-            <div className="flex flex-col gap-8">
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="flex justify-between items-start px-6 py-5 border-b border-slate-100 bg-white">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                      <IconLandmark size={20} className="text-emerald-600" /> Modul Pelaporan Pajak
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-1 font-medium">Estimasi Lampiran I SPT Tahunan Badan.</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <select value={selectedTaxYear} onChange={(e) => setSelectedTaxYear(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-slate-50 text-slate-700 cursor-pointer">
-                      {availableYears.length > 0 ? availableYears.map(year => <option key={year} value={year}>Tahun {year}</option>) : <option value={currentYearStr}>Tahun {currentYearStr}</option>}
-                    </select>
-                    <div className="flex gap-1 ml-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
-                      <button onClick={() => setPrintData({type: 'tax_report', item: singleYearTaxReport})} className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-white rounded-md transition-colors shadow-sm" title="Cetak Laporan Pajak">
-                        <IconPrinter size={18} />
-                      </button>
-                      <button onClick={() => setPrintData({type: 'tax_report', item: singleYearTaxReport, autoDownload: true})} className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-white rounded-md transition-colors shadow-sm" title="Download PDF Pajak">
-                        <IconDownload size={18} />
-                      </button>
-                    </div>
-                  </div>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-start gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2"><IconLandmark size={20} className="text-emerald-600" /> Pajak {lapYear}</h2>
+                  <p className="text-sm text-slate-500 mt-1">PPN dari invoice PPN; PPh Badan dari seluruh peredaran usaha.</p>
                 </div>
-                <div className="p-0 overflow-x-auto bg-slate-50/30">
-                  <table className="w-full text-left border-collapse text-sm">
-                    <tbody className="divide-y divide-slate-100">
-                      <tr className="hover:bg-white transition-colors"><td className="px-6 py-3.5 font-semibold text-slate-700">Peredaran Usaha</td><td className="px-6 py-3.5 text-right font-bold text-slate-800">{formatIDR(singleYearTaxReport.pendapatan)}</td></tr>
-                      <tr className="hover:bg-white transition-colors"><td className="px-6 py-3.5 font-medium text-slate-500 pl-10">- HPP</td><td className="px-6 py-3.5 text-right text-rose-600 font-medium">({formatIDR(singleYearTaxReport.hpp)})</td></tr>
-                      <tr className="bg-white border-y border-slate-200"><td className="px-6 py-3.5 font-bold text-slate-800">Laba Bruto</td><td className="px-6 py-3.5 text-right font-bold text-blue-700">{formatIDR(singleYearTaxReport.labaBruto)}</td></tr>
-                      <tr className="hover:bg-white transition-colors"><td className="px-6 py-3.5 font-medium text-slate-500 pl-10">- Biaya Usaha</td><td className="px-6 py-3.5 text-right text-rose-600 font-medium">({formatIDR(singleYearTaxReport.operasional)})</td></tr>
-                      <tr className="bg-emerald-50/50 border-t border-emerald-200"><td className="px-6 py-4 font-bold text-emerald-800">Penghasilan Neto</td><td className={`px-6 py-4 text-right font-black text-base ${singleYearTaxReport.GridNeto >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{formatIDR(singleYearTaxReport.GridNeto)}</td></tr>
-                    </tbody>
-                  </table>
-                </div>
+                <button onClick={() => { setActiveTab('laporan'); setLapTab('pajak'); }} className="text-sm font-bold text-emerald-700 hover:underline whitespace-nowrap">Rincian →</button>
               </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-1 flex flex-col">
-                <div className="px-6 py-5 border-b border-slate-100 bg-white">
-                  <h2 className="text-lg font-bold text-slate-800">Arus Kas Non-Resmi</h2>
-                  <p className="text-sm text-slate-500 mt-1 font-medium">Pendapatan luar (Non-PPN) tanpa masuk SPT</p>
-                </div>
-                <div className="p-6 overflow-x-auto bg-slate-50/30 flex-1 flex flex-col justify-center">
-                  <div className="flex justify-between items-center pb-4 border-b border-slate-200">
-                    <span className="font-semibold text-slate-600 text-sm">Pemasukan Invoice Non-PPN</span>
-                    <span className="font-bold text-slate-800">{formatIDR(kasMasukNonPPN)}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-4">
-                    <span className="font-bold text-slate-800">TOTAL KAS BEBAS</span>
-                    <span className="font-black text-amber-600 text-xl">{formatIDR(kasMasukNonPPN)}</span>
-                  </div>
-                </div>
+              <div className="px-6 pb-6 overflow-x-auto">
+                <table className="w-full text-sm min-w-[360px]"><tbody>
+                  {lrHead('PPN')}
+                  {lrRow('PPN keluaran', ppnTahun.k, { indent: true })}
+                  {lrRow('PPN masukan (dapat dikreditkan)', ppnTahun.m, { indent: true, neg: true })}
+                  {lrRow('PPN kurang (lebih) bayar', ppnTahun.k - ppnTahun.m, { total: true })}
+                  {lrHead('PPh Badan')}
+                  {lrRow('Peredaran bruto', lr.peredaranBruto, { indent: true })}
+                  {lrRow('Penghasilan kena pajak', lr.pkp, { indent: true })}
+                  {lrRow('PPh Badan terutang (estimasi)', lr.pph.pph, { total: true, note: lr.pph.metode })}
+                </tbody></table>
               </div>
             </div>
           </div>
         </div>
-      );
+        );
+      };
 
       const renderKalender = () => {
         const prevMonth = () => {
@@ -1833,7 +2189,7 @@
                       const day = i + 1;
                       const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                       const dayEvents = calendarEvents[dateStr] || [];
-                      const isToday = dateStr === new Date().toISOString().substring(0, 10);
+                      const isToday = dateStr === todayStr();
                       return (
                         <div key={day} className={`bg-white min-h-[130px] p-2 flex flex-col gap-1.5 ${isToday ? 'bg-blue-50/20' : ''}`}>
                           <div className={`text-xs font-bold self-end w-7 h-7 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400'}`}>{day}</div>
@@ -1894,7 +2250,7 @@
                     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{pnw?.date}</td>
                     <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{pnw?.customer}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold ${pnw?.usePpn ? 'bg-indigo-50 border-indigo-100 text-indigo-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{pnw?.usePpn ? 'PPN 11%':'Non-PPN'}</span>
+                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold ${pnw?.usePpn ? 'bg-indigo-50 border-indigo-100 text-indigo-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{pnw?.usePpn ? 'PPN':'Non-PPN'}</span>
                     </td>
                     <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(pnw?.total)}</td>
                     <td className="px-6 py-4 text-center">
@@ -1927,7 +2283,7 @@
                   </div>
                   <div className="flex items-center gap-3 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100">
                     <input type="checkbox" id="usePpnTogglePnw" checked={penawaranForm.usePpn} onChange={(e) => setPenawaranForm({...penawaranForm, usePpn: e.target.checked})} className="w-5 h-5 text-indigo-600 rounded border-slate-300" />
-                    <label htmlFor="usePpnTogglePnw" className="text-sm font-black text-indigo-900 cursor-pointer">Sertakan PPN 11%</label>
+                    <label htmlFor="usePpnTogglePnw" className="text-sm font-black text-indigo-900 cursor-pointer">Sertakan PPN <span className="font-semibold text-indigo-700">(12% × DPP nilai lain 11/12 — efektif 11%)</span></label>
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-4">
@@ -1951,7 +2307,8 @@
                     <div><label className="block text-sm font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={penawaranForm.signerRole} onChange={(e) => setPenawaranForm({...penawaranForm, signerRole: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
                   </div>
                 </div>
-                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                <div className="p-4 border-t bg-slate-50 flex flex-wrap items-center justify-end gap-2">
+                  {formError && <p className="text-sm text-rose-600 font-semibold mr-auto">{formError}</p>}
                   <button onClick={() => setPenawaranModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
                   <button onClick={handleSavePenawaran} className="px-5 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md">Simpan</button>
                 </div>
@@ -1989,21 +2346,27 @@
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Pelanggan</th>
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Pajak</th>
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-right">Total Tagihan</th>
+                  <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase">Pembayaran</th>
                   <th className="px-6 py-5 text-xs font-bold text-slate-500 uppercase text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(!invoices || invoices.length === 0) ? (
-                  <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
+                  <tr><td colSpan="7" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada data tercatat.</td></tr>
                 ) : invoices.map((inv) => (
                   <tr key={inv?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
                     <td className="px-6 py-4 font-bold text-blue-700 text-sm">{inv?.id}</td>
                     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{inv?.date}</td>
                     <td className="px-6 py-4 text-slate-800 text-sm font-semibold">{inv?.customer}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold ${inv?.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{inv?.usePpn ? 'PPN 11%':'Non-PPN'}</span>
+                      <span className={`px-2.5 py-1 border rounded-md text-xs font-bold ${inv?.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{inv?.usePpn ? 'PPN':'Non-PPN'}</span>
                     </td>
                     <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(inv?.total)}</td>
+                    <td className="px-6 py-4">
+                      {inv?.paidDate
+                        ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 whitespace-nowrap" title="Tanggal pelunasan">Lunas · {inv.paidDate}</span>
+                        : <button onClick={() => markInvoicePaid(inv, todayStr())} className="px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 whitespace-nowrap" title="Tandai lunas hari ini (tanggal bisa diubah lewat Edit)">Belum lunas · Tandai lunas</button>}
+                    </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
                         <button onClick={() => setPrintData({type: 'invoice', item: inv})} className="p-1.5 text-slate-400 hover:text-blue-600"><IconPrinter size={18}/></button>
@@ -2030,10 +2393,11 @@
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div><label className="block text-sm font-bold text-slate-700 mb-1">Tanggal</label><input type="date" value={invoiceForm.date} onChange={(e) => setInvoiceForm({...invoiceForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
                     <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama Pelanggan</label><input type="text" value={invoiceForm.customer} onChange={(e) => setInvoiceForm({...invoiceForm, customer: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div className="sm:col-span-2"><label className="block text-sm font-bold text-slate-700 mb-1">Tanggal Pelunasan <span className="font-medium text-slate-400">— kosongkan jika belum dibayar (dicatat sebagai piutang)</span></label><input type="date" value={invoiceForm.paidDate || ''} onChange={(e) => setInvoiceForm({...invoiceForm, paidDate: e.target.value})} className="w-full sm:w-1/2 bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
                   </div>
                   <div className="flex items-center gap-3 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
                     <input type="checkbox" id="usePpnToggle" checked={invoiceForm.usePpn} onChange={(e) => setInvoiceForm({...invoiceForm, usePpn: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-slate-300" />
-                    <label htmlFor="usePpnToggle" className="text-sm font-black text-blue-900 cursor-pointer">Tagih PPN 11%</label>
+                    <label htmlFor="usePpnToggle" className="text-sm font-black text-blue-900 cursor-pointer">Tagih PPN <span className="font-semibold text-blue-700">(12% × DPP nilai lain 11/12 — efektif 11%)</span></label>
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-4">
@@ -2056,7 +2420,8 @@
                     <div><label className="block text-sm font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={invoiceForm.signerRole} onChange={(e) => setInvoiceForm({...invoiceForm, signerRole: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
                   </div>
                 </div>
-                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                <div className="p-4 border-t bg-slate-50 flex flex-wrap items-center justify-end gap-2">
+                  {formError && <p className="text-sm text-rose-600 font-semibold mr-auto">{formError}</p>}
                   <button onClick={() => setInvoiceModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
                   <button onClick={handleSaveInvoice} className="px-5 py-2 bg-blue-600 text-white font-bold rounded-xl shadow-md">Simpan</button>
                 </div>
@@ -2146,7 +2511,8 @@
                     <div><label className="block text-sm font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={sjForm.signerRole} onChange={(e) => setSjForm({...sjForm, signerRole: e.target.value})} className="w-full border rounded-xl px-3 py-2 bg-white text-sm outline-none" /></div>
                   </div>
                 </div>
-                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                <div className="p-4 border-t bg-slate-50 flex flex-wrap items-center justify-end gap-2">
+                  {formError && <p className="text-sm text-rose-600 font-semibold mr-auto">{formError}</p>}
                   <button onClick={() => setSJModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
                   <button onClick={handleSaveSJ} className="px-5 py-2 bg-emerald-600 text-white font-bold rounded-xl">Simpan</button>
                 </div>
@@ -2220,7 +2586,8 @@
                     <div><label className="block text-xs font-bold text-slate-700 mb-1">Jabatan</label><input type="text" value={kwitansiForm.signerRole} onChange={(e) => setKwitansiForm({...kwitansiForm, signerRole: e.target.value})} className="w-full border rounded-lg px-3 py-1.5 text-xs outline-none" /></div>
                   </div>
                 </div>
-                <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                <div className="p-4 border-t bg-slate-50 flex flex-wrap items-center justify-end gap-2">
+                  {formError && <p className="text-sm text-rose-600 font-semibold mr-auto">{formError}</p>}
                   <button onClick={() => setKwitansiModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
                   <button onClick={handleSaveKwitansi} className="px-5 py-2 bg-amber-600 text-white font-bold rounded-xl">Simpan</button>
                 </div>
@@ -2229,6 +2596,283 @@
           )}
         </div>
       );
+
+      const renderLaporan = () => {
+        const R = ledgerResult, lr = R.lr, A = R.aset, Lb = R.liabilitas, E = R.ekuitas;
+        const setorPPhTahun = (cashTx || []).filter(t => t && t.type === 'setor_pph' && (t.date || '').startsWith(lapYear)).reduce((a, t) => a + num(t.amount), 0);
+        const ppnTot = R.ppnMasa.reduce((a, m) => ({ dpp: a.dpp + m.dpp, k: a.k + m.keluaran, m: a.m + m.masukan, s: a.s + m.setor }), { dpp: 0, k: 0, m: 0, s: 0 });
+        const O = ledger.opening;
+        const saldoLabaAwal = (O.kas + O.piutang + O.persediaan + O.asetTetap - O.akumPenyusutan) - (O.utangUsaha + O.utangPajak + O.pinjaman) - O.modal;
+        const belumLunas = (invoices || []).filter(i => i && i.date && !i.paidDate);
+        const tabs = [['labarugi', 'Laba Rugi'], ['neraca', 'Neraca'], ['pajak', 'Pajak (PPN & PPh)'], ['pengaturan', 'Saldo Awal & Data Pendukung']];
+        const inputCls = 'w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400 tabular-nums';
+        const box = 'bg-white rounded-2xl border border-slate-200 shadow-sm';
+
+        return (
+          <div className="space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Laporan Keuangan &amp; Pajak</h2>
+                <p className="text-sm text-slate-500 mt-1 max-w-2xl">Disusun dengan basis akrual mengacu SAK EMKM. Angka pajak adalah <b>estimasi</b> — cocokkan dengan konsultan pajak sebelum melapor SPT.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {yearSelect()}
+                <button onClick={() => setPrintData({ type: 'lapkeu', item: R })} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-800 text-white flex items-center gap-2"><IconPrinter size={16}/> Cetak</button>
+                <button onClick={() => setPrintData({ type: 'lapkeu', item: R, autoDownload: true })} className="px-4 py-2 rounded-lg text-sm font-bold bg-rose-600 text-white flex items-center gap-2"><IconDownload size={16}/> PDF</button>
+              </div>
+            </div>
+
+            {R.peringatan.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-sm space-y-1">
+                {R.peringatan.map((t, k) => <div key={k} className="flex items-start gap-2"><IconAlertCircle size={16}/> <span>{t}</span></div>)}
+              </div>
+            )}
+
+            <div className="flex gap-2 overflow-x-auto">
+              {tabs.map(([k, l]) => (
+                <button key={k} onClick={() => setLapTab(k)} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap border ${lapTab === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{l}</button>
+              ))}
+            </div>
+
+            {lapTab === 'labarugi' && (
+              <div className={`${box} p-6 max-w-3xl`}>
+                <h3 className="text-lg font-black text-slate-900">Laporan Laba Rugi</h3>
+                <p className="text-sm text-slate-500">Periode 1 Januari – 31 Desember {lapYear}</p>
+                <div className="overflow-x-auto mt-2">
+                <table className="w-full text-sm min-w-[420px]"><tbody>
+                  {lrHead('Pendapatan usaha')}
+                  {lrRow('Penjualan kena PPN (DPP)', lr.penjualanPPN, { indent: true })}
+                  {lrRow('Penjualan tidak dipungut PPN', lr.penjualanNonPPN, { indent: true })}
+                  {lrRow('Jumlah pendapatan usaha', lr.pendapatanUsaha, { total: true })}
+                  {lrHead('Harga pokok penjualan')}
+                  {lrRow('Persediaan awal', lr.persAwal, { indent: true })}
+                  {lrRow('Pembelian barang/bahan', lr.pembelian, { indent: true })}
+                  {lrRow('Persediaan akhir', lr.persAkhir, { indent: true, neg: true, note: lr.persAkhirDiisi ? 'hasil stock opname' : 'belum diisi — dianggap Rp0' })}
+                  {lrRow('Jumlah harga pokok penjualan', lr.hpp, { total: true, neg: true })}
+                  {lrRow('LABA KOTOR', lr.labaKotor, { total: true })}
+                  {lrHead('Beban usaha')}
+                  {lrRow('Beban operasional', lr.bebanOperasional, { indent: true })}
+                  {lrRow('Beban penyusutan aset tetap', lr.penyusutan, { indent: true })}
+                  {lrRow('Jumlah beban usaha', lr.bebanOperasional + lr.penyusutan, { total: true, neg: true })}
+                  {lrRow('LABA USAHA', lr.labaUsaha, { total: true })}
+                  {lrHead('Pendapatan lain-lain')}
+                  {lrRow('Pendapatan lain-lain', lr.pendapatanLain, { indent: true })}
+                  {lrRow('Bunga / jasa giro bank', lr.bungaBank, { indent: true })}
+                  {lrRow('LABA SEBELUM PAJAK', lr.labaSebelumPajak, { total: true })}
+                  {lrRow('Beban pajak penghasilan (estimasi)', lr.bebanPajak, { indent: true, neg: true })}
+                  {lrRow('LABA BERSIH TAHUN BERJALAN', lr.labaBersih, { grand: true })}
+                </tbody></table>
+                </div>
+              </div>
+            )}
+
+            {lapTab === 'neraca' && (
+              <div className={`${box} p-6`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900">Laporan Posisi Keuangan (Neraca)</h3>
+                    <p className="text-sm text-slate-500">Per 31 Desember {lapYear}</p>
+                  </div>
+                  <span className={`px-3 py-1.5 rounded-full text-xs font-black ${Math.abs(R.selisih) < 1 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>{Math.abs(R.selisih) < 1 ? 'Seimbang: Aset = Liabilitas + Ekuitas' : `Selisih ${formatIDR(R.selisih)}`}</span>
+                </div>
+                <div className="grid lg:grid-cols-2 gap-8 mt-2">
+                  <div className="overflow-x-auto"><table className="w-full text-sm min-w-[340px]"><tbody>
+                    {lrHead('Aset lancar')}
+                    {lrRow('Kas dan bank', A.kas, { indent: true })}
+                    {lrRow('Piutang usaha', A.piutang, { indent: true })}
+                    {lrRow('Persediaan', A.persediaan, { indent: true })}
+                    {A.ppnLebihBayar > 0 && lrRow('PPN lebih bayar', A.ppnLebihBayar, { indent: true })}
+                    {A.pphLebihBayar > 0 && lrRow('PPh Badan lebih bayar', A.pphLebihBayar, { indent: true })}
+                    {lrRow('Jumlah aset lancar', A.lancar, { total: true })}
+                    {lrHead('Aset tetap')}
+                    {lrRow('Harga perolehan', A.hargaPerolehan, { indent: true })}
+                    {lrRow('Akumulasi penyusutan', A.akumulasi, { indent: true, neg: true })}
+                    {lrRow('Nilai buku aset tetap', A.asetTetapNeto, { total: true })}
+                    {lrRow('JUMLAH ASET', A.total, { grand: true })}
+                  </tbody></table></div>
+                  <div className="overflow-x-auto"><table className="w-full text-sm min-w-[340px]"><tbody>
+                    {lrHead('Liabilitas')}
+                    {lrRow('Utang usaha', Lb.utangUsaha, { indent: true })}
+                    {lrRow('Utang PPN', Lb.utangPPN, { indent: true })}
+                    {lrRow('Utang PPh Badan', Lb.utangPPh, { indent: true })}
+                    {lrRow('Utang pinjaman', Lb.pinjaman, { indent: true })}
+                    {lrRow('Jumlah liabilitas', Lb.total, { total: true })}
+                    {lrHead('Ekuitas')}
+                    {lrRow('Modal disetor', E.modal, { indent: true })}
+                    {lrRow('Saldo laba awal tahun', E.saldoLabaAwalTahun, { indent: true })}
+                    {lrRow('Laba (rugi) tahun berjalan', E.labaTahunBerjalan, { indent: true })}
+                    {lrRow('Prive / dividen', E.priveTahunIni, { indent: true, neg: true })}
+                    {lrRow('Jumlah ekuitas', E.total, { total: true })}
+                    {lrRow('JUMLAH LIABILITAS & EKUITAS', Lb.total + E.total, { grand: true })}
+                  </tbody></table></div>
+                </div>
+              </div>
+            )}
+
+            {lapTab === 'pajak' && (
+              <div className="space-y-6">
+                <div className="bg-slate-900 text-slate-200 rounded-2xl p-5 text-sm leading-relaxed">
+                  <b className="text-white">Dasar perhitungan.</b> PPN dihitung dari invoice yang memungut PPN (12% × DPP nilai lain 11/12, PMK 131/2024). PPh Badan dihitung dari <b className="text-white">seluruh</b> peredaran usaha — penjualan yang tidak dipungut PPN tetap merupakan penghasilan PT dan objek PPh — dikurangi seluruh beban yang boleh dikurangkan.
+                </div>
+
+                <div className={`${box} p-6`}>
+                  <h3 className="text-lg font-black text-slate-900">PPN per Masa Pajak {lapYear}</h3>
+                  <div className="overflow-x-auto mt-3">
+                    <table className="w-full text-sm min-w-[720px]">
+                      <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                        <th className="py-2 pl-1">Masa</th><th className="py-2 text-right">DPP penjualan PPN</th><th className="py-2 text-right">PPN keluaran</th><th className="py-2 text-right">PPN masukan</th><th className="py-2 text-right">Kurang / (lebih) bayar</th><th className="py-2 pr-1 text-right">Disetor</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {R.ppnMasa.map(m => (
+                          <tr key={m.bulan} className={m.keluaran || m.masukan || m.setor ? 'text-slate-800' : 'text-slate-400'}>
+                            <td className="py-2 pl-1 font-semibold">{BULAN[m.bulan]}</td>
+                            <td className="py-2 text-right tabular-nums">{formatIDR(m.dpp)}</td>
+                            <td className="py-2 text-right tabular-nums">{formatIDR(m.keluaran)}</td>
+                            <td className="py-2 text-right tabular-nums">{formatIDR(m.masukan)}</td>
+                            <td className={`py-2 text-right tabular-nums font-bold ${m.kurangBayar < 0 ? 'text-emerald-700' : ''}`}>{m.kurangBayar < 0 ? paren(m.kurangBayar) : formatIDR(m.kurangBayar)}</td>
+                            <td className="py-2 pr-1 text-right tabular-nums">{formatIDR(m.setor)}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-slate-900 font-black text-slate-900">
+                          <td className="py-2.5 pl-1">Jumlah</td>
+                          <td className="py-2.5 text-right tabular-nums">{formatIDR(ppnTot.dpp)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{formatIDR(ppnTot.k)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{formatIDR(ppnTot.m)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{(ppnTot.k - ppnTot.m) < 0 ? paren(ppnTot.k - ppnTot.m) : formatIDR(ppnTot.k - ppnTot.m)}</td>
+                          <td className="py-2.5 pr-1 text-right tabular-nums">{formatIDR(ppnTot.s)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-3">PPN masukan diambil dari kolom “PPN Masukan” di Pengeluaran (hanya yang memiliki faktur pajak). Setoran dicatat di Saldo Awal &amp; Data Pendukung → Transaksi kas (jenis “Setor PPN”).</p>
+                </div>
+
+                <div className={`${box} p-6 max-w-3xl`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900">PPh Badan — Rekonsiliasi Fiskal {lapYear}</h3>
+                      <p className="text-sm text-slate-500">Estimasi Lampiran SPT Tahunan PPh Badan</p>
+                    </div>
+                    <select value={ledger.pphScheme} onChange={(e) => setLedger(l => ({ ...l, pphScheme: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold bg-white cursor-pointer">
+                      <option value="umum">Tarif umum Ps. 17 + fasilitas Ps. 31E</option>
+                      <option value="final05">PPh final 0,5% (masa transisi PP 20/2026)</option>
+                    </select>
+                  </div>
+                  {ledger.pphScheme === 'final05' && <p className="mt-3 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">Sejak PP 20/2026, PT (bukan PT Perorangan) tidak lagi termasuk wajib pajak PPh final 0,5%. Pilihan ini hanya untuk PT yang sudah memakai tarif 0,5% dan masa berlakunya menurut PP 55/2022 belum berakhir.</p>}
+                  <div className="overflow-x-auto mt-2">
+                  <table className="w-full text-sm min-w-[420px]"><tbody>
+                    {lrRow('Peredaran bruto (penjualan PPN + non-PPN + pendapatan lain)', lr.peredaranBruto)}
+                    {ledger.pphScheme === 'umum' ? (<>
+                      {lrRow('Laba sebelum pajak (komersial)', lr.labaSebelumPajak, { total: true })}
+                      {lrRow('Koreksi fiskal positif (beban tidak dapat dikurangkan)', lr.koreksiPositif, { indent: true })}
+                      {lrRow('Koreksi fiskal negatif (bunga bank — sudah PPh final)', lr.koreksiNegatif, { indent: true, neg: true })}
+                      {lrRow('Penghasilan neto fiskal', lr.penghasilanNetoFiskal, { total: true })}
+                      {lrRow('Penghasilan Kena Pajak (dibulatkan ribuan)', lr.pkp, { total: true })}
+                      {lr.pph.pkpFasilitas > 0 && lrRow('PKP yang mendapat fasilitas 50% (Ps. 31E)', lr.pph.pkpFasilitas, { indent: true })}
+                    </>) : null}
+                    {lrRow('PPh Badan terutang', lr.pph.pph, { total: true, note: lr.pph.metode })}
+                    {lrRow('Kredit pajak / setoran PPh tahun ini', setorPPhTahun, { indent: true, neg: true })}
+                    {lrRow(lr.pph.pph - setorPPhTahun >= 0 ? 'PPh kurang bayar (Ps. 29)' : 'PPh lebih bayar', lr.pph.pph - setorPPhTahun, { grand: true })}
+                  </tbody></table>
+                  </div>
+                  {lr.penghasilanNetoFiskal < 0 && ledger.pphScheme === 'umum' && <p className="mt-3 text-xs text-slate-500">Rugi fiskal dapat dikompensasikan ke tahun-tahun berikutnya (maks. 5 tahun) — belum dihitung otomatis.</p>}
+                </div>
+              </div>
+            )}
+
+            {lapTab === 'pengaturan' && (
+              <div className="space-y-6">
+                <div className="grid lg:grid-cols-2 gap-6">
+                  <div className={`${box} p-6`}>
+                    <h3 className="text-lg font-black text-slate-900">1. Saldo awal</h3>
+                    <p className="text-sm text-slate-500 mt-1">Posisi keuangan <b>sebelum</b> transaksi pertama yang dicatat di portal ini. Isi sekali saja.</p>
+                    <div className="grid sm:grid-cols-2 gap-3 mt-4">
+                      {[['kas', 'Kas & bank'], ['piutang', 'Piutang usaha'], ['persediaan', 'Persediaan barang'], ['asetTetap', 'Aset tetap (harga perolehan)'], ['akumPenyusutan', 'Akumulasi penyusutan'], ['utangUsaha', 'Utang usaha'], ['utangPajak', 'Utang pajak (PPh)'], ['pinjaman', 'Utang pinjaman'], ['modal', 'Modal disetor']].map(([k, l]) => (
+                        <label key={k} className="block"><span className="block text-xs font-bold text-slate-600 mb-1">{l}</span>
+                          <input type="number" min="0" value={ledger.opening[k] || 0} onChange={(e) => setOpening(k, e.target.value)} className={inputCls} /></label>
+                      ))}
+                    </div>
+                    <div className="mt-4 bg-slate-50 border rounded-xl p-3 text-sm flex justify-between"><span className="text-slate-600">Saldo laba awal (otomatis, penyeimbang)</span><b className="tabular-nums">{formatIDR(saldoLabaAwal)}</b></div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className={`${box} p-6`}>
+                      <h3 className="text-lg font-black text-slate-900">2. Persediaan akhir {lapYear}</h3>
+                      <p className="text-sm text-slate-500 mt-1">Nilai stok barang yang belum terjual per 31 Desember {lapYear} (hasil stock opname, dinilai dengan harga beli). Mengurangi HPP.</p>
+                      <input type="number" min="0" placeholder="Belum diisi" value={ledger.closingInventory[lapYear] ?? ''} onChange={(e) => setClosingInventory(lapYear, e.target.value)} className={`${inputCls} mt-3`} />
+                    </div>
+                    <div className={`${box} p-6`}>
+                      <h3 className="text-lg font-black text-slate-900">3. Status pelunasan invoice</h3>
+                      <p className="text-sm text-slate-500 mt-1"><b className="text-slate-800">{belumLunas.length}</b> invoice belum ditandai lunas ({formatIDR(belumLunas.reduce((a, i) => a + num(i.total), 0))}) dan dihitung sebagai piutang. Untuk invoice lama yang sebenarnya sudah dibayar, tandai sekaligus:</p>
+                      <div className="flex flex-wrap items-end gap-2 mt-3">
+                        <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Invoice bertanggal s.d.</span><input type="date" value={bulkPaidUntil} onChange={(e) => setBulkPaidUntil(e.target.value)} className={inputCls} /></label>
+                        <button onClick={() => bulkMarkPaid(bulkPaidUntil)} disabled={!belumLunas.some(i => i.date <= bulkPaidUntil)} className="px-4 py-2 rounded-lg text-sm font-bold bg-emerald-600 text-white disabled:opacity-40">Tandai lunas ({belumLunas.filter(i => i.date <= bulkPaidUntil).length})</button>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-2">Tanggal pelunasan diisi sama dengan tanggal invoice. Bisa diubah per invoice lewat Edit.</p>
+                    </div>
+                  </div>
+                </div>
+
+                {formError && <p className="text-sm text-rose-600 font-semibold">{formError}</p>}
+
+                <div className={`${box} p-6`}>
+                  <h3 className="text-lg font-black text-slate-900">4. Aset tetap</h3>
+                  <p className="text-sm text-slate-500 mt-1">Barang tahan lama untuk operasional (kendaraan, mesin isi ulang, komputer, bangunan). Disusutkan garis lurus per kelompok harta Pasal 11 UU PPh, mulai bulan perolehan.</p>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-4 items-end">
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Tanggal perolehan</span><input type="date" value={assetForm.date} onChange={(e) => setAssetForm({ ...assetForm, date: e.target.value })} className={inputCls} /></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Nama aset</span><input type="text" value={assetForm.name} onChange={(e) => setAssetForm({ ...assetForm, name: e.target.value })} className={inputCls} placeholder="Mis. Mesin pengisi APAR" /></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Harga perolehan</span><input type="number" min="0" value={assetForm.cost} onChange={(e) => setAssetForm({ ...assetForm, cost: e.target.value })} className={inputCls} /></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Kelompok</span><select value={assetForm.kelompok} onChange={(e) => setAssetForm({ ...assetForm, kelompok: e.target.value })} className={inputCls}>{Object.entries(KELOMPOK_HARTA).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
+                    <button onClick={handleAddAsset} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-900 text-white flex items-center justify-center gap-2"><IconPlus size={16}/> Tambah aset</button>
+                  </div>
+                  <div className="overflow-x-auto mt-4">
+                    <table className="w-full text-sm min-w-[720px]">
+                      <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200"><th className="py-2">Tanggal</th><th>Aset</th><th>Kelompok</th><th className="text-right">Harga perolehan</th><th className="text-right">Penyusutan {lapYear}</th><th className="text-right">Nilai buku 31/12/{lapYear}</th><th></th></tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(assets || []).length === 0 ? <tr><td colSpan="7" className="py-4 text-center text-slate-400">Belum ada aset tetap.</td></tr> : assets.map(a => (
+                          <tr key={a.id}>
+                            <td className="py-2">{a.date}</td><td className="font-semibold">{a.name}</td><td className="text-xs text-slate-500">{(KELOMPOK_HARTA[a.kelompok] || KELOMPOK_HARTA.k1).label.split(' — ')[0]}</td>
+                            <td className="text-right tabular-nums">{formatIDR(a.cost)}</td>
+                            <td className="text-right tabular-nums">{formatIDR(penyusutanKumulatif(a, Number(lapYear)) - penyusutanKumulatif(a, Number(lapYear) - 1))}</td>
+                            <td className="text-right tabular-nums">{formatIDR(num(a.cost) - penyusutanKumulatif(a, Number(lapYear)))}</td>
+                            <td className="text-right"><button onClick={() => setDeleteConfirm({ type: 'asset', id: a.id })} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={16}/></button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className={`${box} p-6`}>
+                  <h3 className="text-lg font-black text-slate-900">5. Transaksi kas lain</h3>
+                  <p className="text-sm text-slate-500 mt-1">Uang masuk/keluar yang bukan invoice atau beban: setoran modal, prive, pinjaman, setoran pajak, bunga bank, pelunasan saldo awal.</p>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-4 items-end">
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Tanggal</span><input type="date" value={cashForm.date} onChange={(e) => setCashForm({ ...cashForm, date: e.target.value })} className={inputCls} /></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Jenis</span><select value={cashForm.type} onChange={(e) => setCashForm({ ...cashForm, type: e.target.value })} className={inputCls}>{Object.entries(JENIS_KAS).map(([k, v]) => <option key={k} value={k}>{v.arah > 0 ? '＋ ' : '－ '}{v.label}</option>)}</select></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Jumlah</span><input type="number" min="0" value={cashForm.amount} onChange={(e) => setCashForm({ ...cashForm, amount: e.target.value })} className={inputCls} /></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Keterangan</span><input type="text" value={cashForm.desc} onChange={(e) => setCashForm({ ...cashForm, desc: e.target.value })} className={inputCls} placeholder="Opsional" /></label>
+                    <button onClick={handleAddCash} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-900 text-white flex items-center justify-center gap-2"><IconPlus size={16}/> Catat</button>
+                  </div>
+                  <div className="overflow-x-auto mt-4">
+                    <table className="w-full text-sm min-w-[620px]">
+                      <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200"><th className="py-2">Tanggal</th><th>Jenis</th><th>Keterangan</th><th className="text-right">Jumlah</th><th></th></tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(cashTx || []).filter(t => (t.date || '').startsWith(lapYear)).length === 0 ? <tr><td colSpan="5" className="py-4 text-center text-slate-400">Belum ada transaksi kas lain di {lapYear}.</td></tr> : cashTx.filter(t => (t.date || '').startsWith(lapYear)).map(t => (
+                          <tr key={t.id}>
+                            <td className="py-2">{t.date}</td><td className="font-semibold">{(JENIS_KAS[t.type] || {}).label || t.type}</td><td className="text-slate-500">{t.desc}</td>
+                            <td className={`text-right tabular-nums font-bold ${(JENIS_KAS[t.type] || {}).arah > 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{(JENIS_KAS[t.type] || {}).arah > 0 ? '+' : '−'} {formatIDR(t.amount)}</td>
+                            <td className="text-right"><button onClick={() => setDeleteConfirm({ type: 'cashTx', id: t.id })} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={16}/></button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      };
 
       const renderPengeluaran = () => (
         <div className="space-y-6">
@@ -2245,21 +2889,30 @@
                   <th className="px-6 py-4 text-xs font-bold uppercase">Deskripsi</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase">Kategori</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase text-right">Nominal Beban</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase text-right">PPN Masukan</th>
+                  <th className="px-6 py-4 text-xs font-bold uppercase">Pembayaran</th>
                   <th className="px-6 py-4 text-xs font-bold uppercase text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(!expenses || expenses.length === 0) ? (
-                    <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada pengeluaran tercatat.</td></tr>
+                    <tr><td colSpan="8" className="px-6 py-8 text-center text-slate-500 font-medium">Belum ada pengeluaran tercatat.</td></tr>
                 ) : expenses.map((exp) => (
                   <tr key={exp?.id || Math.random()} className="hover:bg-slate-50/80 transition-colors group">
                     <td className="px-6 py-4 font-semibold text-slate-500 text-sm">{exp?.id}</td>
                     <td className="px-6 py-4 text-slate-600 text-sm font-medium">{exp?.date}</td>
                     <td className="px-6 py-4 text-slate-800 text-sm font-medium">{exp?.desc}</td>
                     <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.category === 'HPP' ? 'bg-orange-50 border-orange-100 text-orange-700':'bg-purple-50 border-purple-100 text-purple-700'}`}>{exp?.category}</span>
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.category === 'HPP' ? 'bg-orange-50 border-orange-100 text-orange-700':'bg-purple-50 border-purple-100 text-purple-700'}`}>{exp?.category === 'HPP' ? 'Pembelian (HPP)' : 'Operasional'}</span>
+                      {exp?.nonDeductible && <span className="ml-1.5 px-2 py-1 rounded-md text-[10px] font-bold border bg-slate-100 border-slate-200 text-slate-600" title="Tidak dapat dikurangkan secara pajak (koreksi fiskal positif)">Non-deductible</span>}
                     </td>
                     <td className="px-6 py-4 text-right font-bold text-rose-600">{formatIDR(exp?.amount)}</td>
+                    <td className="px-6 py-4 text-right text-sm text-slate-600">{num(exp?.ppnMasukan) ? formatIDR(exp.ppnMasukan) : '—'}</td>
+                    <td className="px-6 py-4">
+                      {exp?.paymentStatus === 'utang' && !exp?.paidDate
+                        ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 border border-amber-200 text-amber-700">Utang</span>
+                        : <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700">Lunas</span>}
+                    </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
                         <button onClick={() => handleEdit('expense', exp)} className="p-1.5 text-slate-400 hover:text-amber-500"><IconEdit size={18}/></button>
@@ -2275,18 +2928,31 @@
           {/* Modal Beban */}
           {isExpenseModalOpen && (
             <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-slate-100">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] overflow-hidden flex flex-col border border-slate-100">
                 <div className="flex justify-between items-center p-6 border-b border-slate-100 bg-slate-50/50">
                   <h3 className="text-xl font-bold text-slate-800">{editingId ? 'Edit Pengeluaran' : 'Catat Pengeluaran Baru'}</h3>
                   <button onClick={() => setExpenseModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full"><IconX size={24} /></button>
                 </div>
-                <div className="p-6 space-y-4 bg-white">
+                <div className="p-6 space-y-4 bg-white overflow-y-auto">
                   <div><label className="block text-sm font-semibold text-slate-700 mb-1">Tanggal</label><input type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
                   <div><label className="block text-sm font-semibold text-slate-700 mb-1">Deskripsi Beban</label><input type="text" value={expenseForm.desc} onChange={(e) => setExpenseForm({...expenseForm, desc: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
-                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Kategori Akuntansi</label><select value={expenseForm.category} onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none font-medium cursor-pointer"><option value="Operasional">Beban Operasional (Biaya Usaha)</option><option value="HPP">HPP (Modal / Beban Pokok Penjualan)</option></select></div>
-                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Nominal (Rp)</label><input type="number" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  <div><label className="block text-sm font-semibold text-slate-700 mb-1">Kategori Akuntansi</label><select value={expenseForm.category} onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none font-medium cursor-pointer"><option value="Operasional">Beban Operasional (gaji, sewa, listrik, transport, dll.)</option><option value="HPP">Pembelian Barang/Bahan untuk Dijual (HPP)</option></select></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Nominal (Rp)</label><input type="number" min="0" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">PPN Masukan (Rp)</label><input type="number" min="0" value={expenseForm.ppnMasukan || 0} onChange={(e) => setExpenseForm({...expenseForm, ppnMasukan: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
+                  </div>
+                  <p className="text-xs text-slate-500 -mt-2">Nominal = harga <b>sebelum PPN</b>. Isi PPN Masukan hanya jika ada faktur pajak dari pemasok (dapat dikreditkan).</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Pembayaran</label><select value={expenseForm.paymentStatus || 'lunas'} onChange={(e) => setExpenseForm({...expenseForm, paymentStatus: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer"><option value="lunas">Lunas (dibayar tunai/transfer)</option><option value="utang">Belum dibayar (utang)</option></select></div>
+                    {expenseForm.paymentStatus === 'utang' && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Tanggal Pelunasan</label><input type="date" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
+                  </div>
+                  <label className="flex items-start gap-3 bg-slate-50 border rounded-xl p-3 cursor-pointer">
+                    <input type="checkbox" checked={!!expenseForm.nonDeductible} onChange={(e) => setExpenseForm({...expenseForm, nonDeductible: e.target.checked})} className="w-4 h-4 mt-0.5" />
+                    <span className="text-xs text-slate-600"><b className="text-slate-800 block text-sm">Tidak dapat dikurangkan secara pajak</b>Contoh: sumbangan, sanksi/denda pajak, biaya pribadi, jamuan tanpa daftar nominatif. Tetap tercatat di laba rugi, tetapi dikoreksi positif di perhitungan PPh.</span>
+                  </label>
                 </div>
-                <div className="p-6 border-t bg-slate-50 flex justify-end gap-2">
+                <div className="p-6 border-t bg-slate-50 flex flex-wrap items-center justify-end gap-2">
+                  {formError && <p className="text-sm text-rose-600 font-semibold mr-auto">{formError}</p>}
                   <button onClick={() => setExpenseModalOpen(false)} className="px-4 py-2 font-bold text-slate-600 rounded-xl">Batal</button>
                   <button onClick={handleSaveExpense} className="px-6 py-2 bg-rose-600 text-white font-bold rounded-xl">Simpan Beban</button>
                 </div>
@@ -2303,7 +2969,7 @@
               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 text-center border">
                 <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-rose-100"><IconAlertCircle size={32} /></div>
                 <h3 className="text-xl font-black text-slate-800 mb-1">Hapus Data?</h3>
-                <p className="text-sm text-slate-500 mb-6">Sistem akan otomatis mengatur ulang nomor surat yang tersisa.</p>
+                <p className="text-sm text-slate-500 mb-6">Data akan dihapus permanen. Nomor dokumen lain tidak berubah.</p>
                 <div className="flex gap-3">
                   <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-sm">Batal</button>
                   <button onClick={executeDelete} className="flex-1 py-2 bg-rose-600 text-white font-bold rounded-xl text-sm">Hapus</button>
@@ -2374,6 +3040,7 @@
               <button onClick={() => setActiveTab('suratjalan')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'suratjalan' ? 'border-emerald-600 text-emerald-600 bg-emerald-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTruck size={18}/> Surat Jalan</button>
               <button onClick={() => setActiveTab('kwitansi')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'kwitansi' ? 'border-amber-600 text-amber-600 bg-amber-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconReceipt size={18}/> Kwitansi</button>
               <button onClick={() => setActiveTab('pengeluaran')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'pengeluaran' ? 'border-rose-600 text-rose-600 bg-rose-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTrendingDown size={18}/> Pengeluaran</button>
+              <button onClick={() => setActiveTab('laporan')} className={`flex items-center gap-2 px-4 py-3.5 border-b-2 font-bold whitespace-nowrap ${activeTab === 'laporan' ? 'border-slate-900 text-slate-900 bg-slate-100':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconLandmark size={18}/> Laporan</button>
             </div>
           </nav>
 
@@ -2383,7 +3050,7 @@
                 <div className="mb-6 flex flex-col sm:flex-row sm:items-center gap-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl p-4 text-sm font-semibold">
                   <div className="flex items-start gap-3 flex-1"><IconAlertCircle size={20}/> <span>{syncError}</span></div>
                   <div className="flex gap-2">
-                    {isAPI && <button onClick={() => saveToServer({ penawaran, invoices, expenses, suratJalan, kwitansi })} disabled={isSyncing} className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold disabled:opacity-60">{isSyncing ? 'Menyimpan...' : 'Coba simpan lagi'}</button>}
+                    {isAPI && <button onClick={() => saveToServer({ penawaran, invoices, expenses, suratJalan, kwitansi, assets, cashTx, ledger })} disabled={isSyncing} className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold disabled:opacity-60">{isSyncing ? 'Menyimpan...' : 'Coba simpan lagi'}</button>}
                     <button onClick={() => setSyncError('')} className="px-3 py-2 bg-white border border-rose-200 rounded-xl text-xs font-bold">Tutup</button>
                   </div>
                 </div>
@@ -2400,6 +3067,7 @@
               {activeTab === 'suratjalan' && renderSuratJalan()}
               {activeTab === 'kwitansi' && renderKwitansi()}
               {activeTab === 'pengeluaran' && renderPengeluaran()}
+              {activeTab === 'laporan' && renderLaporan()}
             </div>
           </main>
 
@@ -2411,6 +3079,7 @@
             <button onClick={() => setActiveTab('suratjalan')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'suratjalan' ? 'text-emerald-600 bg-emerald-50':'text-slate-400'}`}><IconTruck size={20}/> SJ</button>
             <button onClick={() => setActiveTab('kwitansi')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'kwitansi' ? 'text-amber-600 bg-amber-50':'text-slate-400'}`}><IconReceipt size={20}/> KWT</button>
             <button onClick={() => setActiveTab('pengeluaran')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'pengeluaran' ? 'text-rose-600 bg-rose-50':'text-slate-400'}`}><IconTrendingDown size={20}/> Beban</button>
+            <button onClick={() => setActiveTab('laporan')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'laporan' ? 'text-slate-900 bg-slate-100':'text-slate-400'}`}><IconLandmark size={20}/> Laporan</button>
           </nav>
         </div>
       );
