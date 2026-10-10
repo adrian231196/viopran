@@ -19,6 +19,11 @@
  *    yang dibutuhkan menu tersebut, dan hanya menerima perubahan pada data yang
  *    boleh diubah — data lain dipertahankan apa adanya.
  *
+ *  APLIKASI NVP OPERASIONAL (viopran.com/app)
+ *  - Akun peran Teknisi / Manager Operasional / Direktur dibuat di menu Pengguna
+ *    yang sama, khusus untuk aplikasi (tidak bisa masuk portal keuangan).
+ *  - Semua action "ops..." ditangani OpsApi.gs.
+ *
  *  LUPA PASSWORD ADMIN?
  *   Isi password di setupNvpUsers() lalu Run sekali. Akun lain (dan menu yang
  *   sudah diatur) tidak berubah. Setelah itu kembalikan teks GANTI-PASSWORD-...
@@ -28,6 +33,8 @@
  */
 
 var NVP_TIMEZONE = 'Asia/Jakarta';
+var NVP_ROLES = ['admin', 'staff', 'teknisi', 'manager', 'direktur'];
+var NVP_ROLES_APLIKASI = ['teknisi', 'manager', 'direktur'];
 var NVP_BACKUP_FOLDER = 'NVP Backup';
 
 // ---- Daftar menu & data yang dipakai tiap menu (harus sama dengan index.html)
@@ -81,8 +88,10 @@ function doPost(e) {
   var out;
   try {
     var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (String(body.action || '').indexOf('ops') === 0) return nvpJson_(opsHandle_(body));
     var user = nvpAuth_(body.username, body.password);
     if (!user) return nvpJson_({ ok: false, error: 'AUTH' });
+    if (NVP_ROLES_APLIKASI.indexOf(user.role) >= 0) return nvpJson_({ ok: false, error: 'AKUN_APLIKASI' });
     var access = nvpAccess_(user);
 
     if (body.action === 'load') {
@@ -93,7 +102,9 @@ function doPost(e) {
       if (!body.data || typeof body.data !== 'object') return nvpJson_({ ok: false, error: 'DATA_TIDAK_VALID' });
       nvpWithLock_(function () {
         var data = body.data;
-        if (user.role !== 'admin') data = nvpMergeWrite_(data, loadDataFromDrive_(), access.write);
+        var current = loadDataFromDrive_();
+        if (user.role !== 'admin') data = nvpMergeWrite_(data, current, access.write);
+        data = opsJagaPengeluaran_(data, current); // pengeluaran dari aplikasi tidak ikut terhapus/terubah
         nvpDailyBackup_();
         saveDataToDrive_(JSON.stringify(data));
       });
@@ -145,6 +156,7 @@ function nvpFindUser_(list, username) {
 function nvpRole_(u) { return u.role || (u.username === 'admin' ? 'admin' : 'staff'); }
 function nvpMenus_(u) {
   if (nvpRole_(u) === 'admin') return NVP_MENUS.slice();
+  if (nvpRole_(u) !== 'staff') return [];
   var m = Array.isArray(u.menus) ? u.menus : NVP_STAFF_DEFAULT;
   return NVP_MENUS.filter(function (k) { return m.indexOf(k) >= 0; });
 }
@@ -161,7 +173,7 @@ function nvpSaveUserAction_(u, isNew, actor) {
   if (!/^[a-z0-9._-]{3,30}$/.test(username)) throw new Error('Username 3–30 karakter: huruf kecil, angka, titik, - atau _.');
   var name = String(u.name || '').trim().slice(0, 60);
   if (!name) throw new Error('Nama wajib diisi.');
-  var role = u.role === 'admin' ? 'admin' : 'staff';
+  var role = NVP_ROLES.indexOf(u.role) >= 0 ? u.role : 'staff';
   var menus = NVP_MENUS.filter(function (k) { return Array.isArray(u.menus) && u.menus.indexOf(k) >= 0; });
 
   var list = nvpLoadUsers_();
@@ -175,7 +187,7 @@ function nvpSaveUserAction_(u, isNew, actor) {
   rec.name = name;
   rec.initial = name.charAt(0).toUpperCase();
   rec.role = role;
-  rec.menus = role === 'admin' ? [] : menus;
+  rec.menus = role === 'staff' ? menus : [];
   if (u.password) rec.hash = nvpHash_(u.password);
   if (i >= 0) list[i] = rec; else list.push(rec);
   if (!list.some(function (x) { return nvpRole_(x) === 'admin'; })) throw new Error('Minimal harus ada satu admin.');
