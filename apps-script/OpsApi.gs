@@ -555,7 +555,7 @@ function opsVapid_() {
   if (raw) return JSON.parse(raw);
   var seed = [];
   for (var i = 0; i < 4; i++) seed = seed.concat(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + ':' + Date.now() + ':' + i));
-  var d = (opsBytesToBig_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, seed)) % (P256.n - 1n)) + 1n;
+  var d = (opsBytesToBig_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, seed)) % (P256.n - BN1_)) + BN1_;
   var Q = p256Mul_(d, P256.G);
   var pub = [4].concat(opsBigToBytes_(Q[0], 32), opsBigToBytes_(Q[1], 32));
   var v = { d: d.toString(16), pub: opsB64u_(pub) };
@@ -570,15 +570,17 @@ function opsVapidJwt_(v, aud) {
 }
 
 // ---- ECDSA P-256 (ES256) — implementasi kecil dengan BigInt, tanda tangan deterministik RFC 6979
+// Catatan: Apps Script tidak menerima penulisan angka BigInt seperti 0n, jadi dipakai BigInt('...')
+var BN0_ = BigInt(0), BN1_ = BigInt(1), BN2_ = BigInt(2), BN3_ = BigInt(3);
 var P256 = {
-  p: 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn,
-  a: 0xffffffff00000001000000000000000000000000fffffffffffffffffffffffcn,
-  n: 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n,
-  G: [0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n, 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n],
+  p: BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff'),
+  a: BigInt('0xffffffff00000001000000000000000000000000fffffffffffffffffffffffc'),
+  n: BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551'),
+  G: [BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'), BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5')],
 };
-function p256Mod_(x, m) { var r = x % m; return r < 0n ? r + m : r; }
+function p256Mod_(x, m) { var r = x % m; return r < BN0_ ? r + m : r; }
 function p256Inv_(x, m) {
-  var a = p256Mod_(x, m), b = m, x0 = 1n, x1 = 0n;
+  var a = p256Mod_(x, m), b = m, x0 = BN1_, x1 = BN0_;
   while (b) { var q = a / b, t = a - q * b; a = b; b = t; t = x0 - q * x1; x0 = x1; x1 = t; }
   return p256Mod_(x0, m);
 }
@@ -586,15 +588,15 @@ function p256Add_(P, Q) {
   if (!P) return Q; if (!Q) return P;
   var p = P256.p, l;
   if (P[0] === Q[0]) {
-    if (p256Mod_(P[1] + Q[1], p) === 0n) return null;
-    l = p256Mod_((3n * P[0] * P[0] + P256.a) * p256Inv_(2n * P[1], p), p);
+    if (p256Mod_(P[1] + Q[1], p) === BN0_) return null;
+    l = p256Mod_((BN3_ * P[0] * P[0] + P256.a) * p256Inv_(BN2_ * P[1], p), p);
   } else l = p256Mod_((Q[1] - P[1]) * p256Inv_(Q[0] - P[0], p), p);
   var x = p256Mod_(l * l - P[0] - Q[0], p);
   return [x, p256Mod_(l * (P[0] - x) - P[1], p)];
 }
 function p256Mul_(k, P) {
   var R = null, A = P;
-  while (k > 0n) { if (k & 1n) R = p256Add_(R, A); A = p256Add_(A, A); k >>= 1n; }
+  while (k > BN0_) { if (k & BN1_) R = p256Add_(R, A); A = p256Add_(A, A); k >>= BN1_; }
   return R;
 }
 function p256Hmac_(key, msg) { return Utilities.computeHmacSignature(Utilities.MacAlgorithm.HMAC_SHA_256, msg, key); }
@@ -610,11 +612,11 @@ function p256Sign_(d, msgBytes) {
   while (true) {
     V = p256Hmac_(K, V);
     var k = opsBytesToBig_(V);
-    if (k > 0n && k < n) {
+    if (k > BN0_ && k < n) {
       var R = p256Mul_(k, P256.G), r = R[0] % n;
-      if (r !== 0n) {
+      if (r !== BN0_) {
         var s = p256Mod_(p256Inv_(k, n) * (e + r * d), n);
-        if (s !== 0n) return opsBigToBytes_(r, 32).concat(opsBigToBytes_(s, 32));
+        if (s !== BN0_) return opsBigToBytes_(r, 32).concat(opsBigToBytes_(s, 32));
       }
     }
     K = p256Hmac_(K, V.concat([0])); V = p256Hmac_(K, V);
