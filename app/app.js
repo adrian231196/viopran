@@ -434,13 +434,210 @@ const KOSONG = {
   users: []
 };
 async function api(payload) {
+  let detik = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 60;
   if (!API_URL) throw new Error('API_URL belum diatur (config.js)');
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    body: JSON.stringify(payload)
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const tm = ctrl ? setTimeout(() => ctrl.abort(), detik * 1000) : null;
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal: ctrl ? ctrl.signal : undefined
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } finally {
+    if (tm) clearTimeout(tm);
+  }
+}
+
+// ---- Penyimpanan di HP (IndexedDB): muat ratusan foto, tidak dibatasi 5 MB seperti localStorage
+let _idb = null;
+function idbBuka() {
+  if (!_idb) _idb = new Promise((res, rej) => {
+    const r = indexedDB.open('nvp-ops', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error('blocked'));
   });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  return _idb;
+}
+async function idbGet(k) {
+  const db = await idbBuka();
+  return new Promise((res, rej) => {
+    const q = db.transaction('kv').objectStore('kv').get(k);
+    q.onsuccess = () => res(q.result);
+    q.onerror = () => rej(q.error);
+  });
+}
+async function idbSet(k, v) {
+  const db = await idbBuka();
+  return new Promise((res, rej) => {
+    const t = db.transaction('kv', 'readwrite');
+    t.objectStore('kv').put(v, k);
+    t.oncomplete = () => res();
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error);
+  });
+}
+async function muatAwal() {
+  let c = null;
+  try {
+    c = await Promise.race([idbGet(CACHE_KEY), new Promise((_, rej) => setTimeout(() => rej(new Error('lambat')), 4000))]);
+  } catch (e) {
+    c = null;
+  }
+  if (!c) c = bacaCache(); // dari versi lama (localStorage)
+  return c;
+}
+const TERTUNDA_KEY = 'nvp_ops_tertunda';
+
+// ---- Kiriman ke server dipotong per ±2,5 MB supaya foto banyak tetap terkirim walau sinyal lemah
+const BATAS_KIRIM = 2500000;
+const ukuran = x => JSON.stringify(x).length;
+function pecahEntri(e) {
+  const recs = [];
+  Object.keys(e.changes || {}).forEach(col => (e.changes[col] || []).forEach(rec => recs.push([col, rec])));
+  if (recs.length > 1) {
+    return recs.map((_ref4, i) => {
+      let [col, rec] = _ref4;
+      return {
+        changes: {
+          [col]: [rec]
+        },
+        notifs: i === recs.length - 1 ? e.notifs || [] : [],
+        dibaca: i === recs.length - 1 ? e.dibaca || [] : []
+      };
+    });
+  }
+  if (recs.length === 1 && recs[0][0] === 'tugas' && (recs[0][1].units || []).length > 1) {
+    const rec = recs[0][1],
+      grup = [];
+    let g = [],
+      sz = 0;
+    rec.units.forEach((u, i) => {
+      const z = ukuran(u);
+      if (g.length && sz + z > BATAS_KIRIM) {
+        grup.push(g);
+        g = [];
+        sz = 0;
+      }
+      g.push(i);
+      sz += z;
+    });
+    if (g.length) grup.push(g);
+    if (grup.length < 2) return null;
+    return grup.map((idx, gi) => {
+      const akhir = gi === grup.length - 1;
+      const part = {
+        ...rec,
+        units: rec.units.map((u, i) => idx.includes(i) ? u : null)
+      };
+      if (!akhir) {
+        part.history = [];
+        if (part.status === 'selesai') part.status = 'dikerjakan';
+      }
+      return {
+        changes: {
+          tugas: [part]
+        },
+        notifs: akhir ? e.notifs || [] : [],
+        dibaca: akhir ? e.dibaca || [] : []
+      };
+    });
+  }
+  return null;
+}
+function ambilPotongan(antri) {
+  const out = [];
+  let sz = 0;
+  while (antri.length) {
+    const z = ukuran(antri[0]);
+    if (!out.length && z > BATAS_KIRIM) {
+      const p = pecahEntri(antri[0]);
+      if (p) {
+        antri.splice(0, 1, ...p);
+        continue;
+      }
+    }
+    if (out.length && sz + z > BATAS_KIRIM) break;
+    out.push(antri.shift());
+    sz += z;
+  }
+  return out;
+}
+
+// ---- Foto yang dikirim dari HP ini langsung disimpan untuk dibuka tanpa internet
+const namaAman = n => String(n || '').replace(/[^\w.\-]+/g, '-');
+async function simpanBerkas(fileId, dataUrl) {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const c = await caches.open('nvp-ops-berkas');
+    await c.put(new Request('/__nvp_berkas/' + fileId), new Response(blob));
+  } catch (e) {}
+}
+function simpanFotoSendiri(batch, data) {
+  const jalan = (a, b) => {
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return;
+    if (a.dataUrl && b.fileId) {
+      if (!a.name || namaAman(a.name) === b.name) simpanBerkas(b.fileId, a.dataUrl);
+      return;
+    }
+    if (Array.isArray(a)) a.forEach((x, i) => jalan(x, b[i]));else Object.keys(a).forEach(k => jalan(a[k], b[k]));
+  };
+  batch.forEach(e => Object.keys(e.changes || {}).forEach(col => (e.changes[col] || []).forEach(rec => jalan(rec, (data[col] || []).find(x => x.id === rec.id)))));
+}
+// ---- Unduh foto & PDF penting ke HP agar tetap bisa dibuka saat offline
+let _unduhJalan = 0;
+async function siapkanOffline(data, me) {
+  if (Date.now() - _unduhJalan < 10 * 60000 || !navigator.onLine) return;
+  _unduhJalan = Date.now();
+  const ids = [],
+    pdf = [];
+  const kumpul = x => {
+    if (!x || typeof x !== 'object') return;
+    if (x.fileId) {
+      ids.push(x.fileId);
+      return;
+    }
+    (Array.isArray(x) ? x : Object.values(x)).forEach(kumpul);
+  };
+  const aktifTugas = (data.tugas || []).filter(t => t.status !== 'selesai' || me.role !== 'teknisi');
+  aktifTugas.slice(0, 15).forEach(t => kumpul(t.units));
+  (data.pekerjaan || []).slice(0, 10).forEach(p => kumpul(p.foto));
+  (data.aju || []).filter(a => !['dibayar', 'ditolak'].includes(a.status)).forEach(a => kumpul(a.lampiran));
+  (data.aju || []).slice(0, 10).forEach(a => kumpul(a.bayar && a.bayar.bukti));
+  (data.tugas || []).concat(data.pekerjaan || []).filter(x => x.pdf).slice(0, 6).forEach(x => pdf.push(x.pdf.fileId));
+  let c;
+  try {
+    c = await caches.open('nvp-ops-berkas');
+  } catch (e) {
+    return;
+  }
+  let n = 0;
+  for (const id of [...new Set(ids.concat(pdf))]) {
+    if (n >= 40 || !navigator.onLine) break;
+    const key = new Request('/__nvp_berkas/' + id);
+    try {
+      if (await c.match(key)) continue;
+      const r = await api({
+        action: 'opsFile',
+        token: TOKEN,
+        fileId: id
+      }, 90);
+      if (!r.ok) continue;
+      const bin = atob(r.b64),
+        arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      await c.put(key, new Response(new Blob([arr], {
+        type: r.mime
+      })));
+      n++;
+    } catch (e) {
+      break;
+    }
+  }
 }
 function bacaCache() {
   try {
@@ -538,12 +735,12 @@ async function ambilBerkas(fileId) {
   p.catch(() => _berkas.delete(fileId));
   return p;
 }
-function Foto(_ref4) {
+function Foto(_ref5) {
   let {
     f,
     className = '',
     alt = ''
-  } = _ref4;
+  } = _ref5;
   const [src, setSrc] = useState(f && f.dataUrl ? f.dataUrl : '');
   const [gagal, setGagal] = useState(false);
   useEffect(() => {
@@ -559,7 +756,7 @@ function Foto(_ref4) {
   }, [f && (f.fileId || f.dataUrl)]);
   if (!src) return /*#__PURE__*/React.createElement("div", {
     className: `${className} bg-slate-200 flex items-center justify-center text-[10px] text-slate-500`
-  }, gagal ? 'Foto belum bisa dimuat' : 'Memuat…');
+  }, gagal ? navigator.onLine === false ? 'Foto tampil saat online' : 'Foto belum bisa dimuat' : 'Memuat…');
   return /*#__PURE__*/React.createElement("img", {
     src: src,
     alt: alt || f && f.name || '',
@@ -581,7 +778,7 @@ async function bukaBerkas(fileId, nama, setToast) {
     }
   } catch (e) {
     if (w) w.close();
-    if (setToast) setToast('PDF belum bisa dibuka — periksa koneksi internet.');
+    if (setToast) setToast(navigator.onLine === false ? 'PDF ini belum tersimpan di HP — buka saat ada internet.' : 'PDF belum bisa dibuka — coba lagi.');
   }
 }
 
@@ -639,12 +836,12 @@ async function lepasPush(sesi) {
 }
 
 // ================================================================== ikon & komponen kecil
-const Ico = _ref5 => {
+const Ico = _ref6 => {
   let {
     d,
     size = 20,
     className = ''
-  } = _ref5;
+  } = _ref6;
   return /*#__PURE__*/React.createElement("svg", {
     width: size,
     height: size,
@@ -795,30 +992,30 @@ const I = {
     d: "M16 3.1a4 4 0 0 1 0 7.8M22 21a7 7 0 0 0-4-6.3"
   }))
 };
-const Badge = _ref6 => {
+const Badge = _ref7 => {
   let {
     map,
     status
-  } = _ref6;
+  } = _ref7;
   const s = map[status] || ['?', 'slate'];
   return /*#__PURE__*/React.createElement("span", {
     className: `inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${TONE[s[1]]}`
   }, s[0]);
 };
-const Kosong = _ref7 => {
+const Kosong = _ref8 => {
   let {
     teks
-  } = _ref7;
+  } = _ref8;
   return /*#__PURE__*/React.createElement("div", {
     className: "bg-white/60 border border-dashed border-slate-300 rounded-2xl p-6 text-center text-sm text-slate-500"
   }, teks);
 };
-const Seksi = _ref8 => {
+const Seksi = _ref9 => {
   let {
     judul,
     children,
     aksi
-  } = _ref8;
+  } = _ref9;
   return /*#__PURE__*/React.createElement("section", {
     className: "bg-white rounded-2xl border border-slate-200 p-4"
   }, /*#__PURE__*/React.createElement("div", {
@@ -827,11 +1024,11 @@ const Seksi = _ref8 => {
     className: "text-xs font-black uppercase tracking-widest text-slate-500"
   }, judul), aksi), children);
 };
-const Baris = _ref9 => {
+const Baris = _ref10 => {
   let {
     k,
     v
-  } = _ref9;
+  } = _ref10;
   return /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between gap-4 py-1.5 text-sm border-b border-slate-100 last:border-0"
   }, /*#__PURE__*/React.createElement("span", {
@@ -840,11 +1037,11 @@ const Baris = _ref9 => {
     className: "text-right font-semibold break-words min-w-0"
   }, v));
 };
-const Bar = _ref10 => {
+const Bar = _ref11 => {
   let {
     pct,
     tone = 'bg-red-600'
-  } = _ref10;
+  } = _ref11;
   return /*#__PURE__*/React.createElement("div", {
     className: "h-2 rounded-full bg-slate-200 overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
@@ -854,11 +1051,11 @@ const Bar = _ref10 => {
     }
   }));
 };
-const Kembali = _ref11 => {
+const Kembali = _ref12 => {
   let {
     onClick,
     teks = 'Kembali'
-  } = _ref11;
+  } = _ref12;
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     className: "inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-sm font-bold text-slate-600 shadow-sm active:bg-slate-50"
@@ -870,12 +1067,12 @@ const Kembali = _ref11 => {
   })), teks);
 };
 const inp = 'w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-red-500';
-const Lab = _ref12 => {
+const Lab = _ref13 => {
   let {
     t,
     hint,
     children
-  } = _ref12;
+  } = _ref13;
   return /*#__PURE__*/React.createElement("label", {
     className: "block"
   }, /*#__PURE__*/React.createElement("span", {
@@ -888,13 +1085,13 @@ const Lab = _ref12 => {
 };
 const btnUtama = 'w-full py-3.5 rounded-2xl bg-red-600 text-white font-black flex items-center justify-center gap-2 disabled:opacity-40';
 const btnGaris = 'w-full py-3 rounded-2xl border border-slate-300 text-slate-700 font-bold text-sm';
-function Segmen(_ref13) {
+function Segmen(_ref14) {
   let {
     value,
     options,
     onChange,
     label
-  } = _ref13;
+  } = _ref14;
   return /*#__PURE__*/React.createElement("div", {
     role: "group",
     "aria-label": label,
@@ -910,13 +1107,13 @@ function Segmen(_ref13) {
     }, o);
   }));
 }
-function FotoInput(_ref14) {
+function FotoInput(_ref15) {
   let {
     label,
     list,
     setList,
     max = 6
-  } = _ref14;
+  } = _ref15;
   const ref = useRef(null);
   const pilih = async e => {
     const files = Array.from(e.target.files || []);
@@ -965,11 +1162,11 @@ function FotoInput(_ref14) {
     onChange: pilih
   }));
 }
-function BarisApar(_ref15) {
+function BarisApar(_ref16) {
   let {
     rows,
     setRows
-  } = _ref15;
+  } = _ref16;
   const set = (i, k, v) => setRows(rows.map((r, j) => j === i ? {
     ...r,
     [k]: v
@@ -1030,8 +1227,11 @@ function BarisApar(_ref15) {
 }
 
 // ================================================================== App
-function App() {
-  const cache0 = useRef(bacaCache()).current || {};
+function App(_ref17) {
+  let {
+    awal
+  } = _ref17;
+  const cache0 = useRef(awal || {}).current;
   const [sesi, setSesi] = useState(cache0.sesi || null);
   const [st, setSt] = useState(cache0.data || KOSONG);
   const [pref, setPref] = useState(bacaPref);
@@ -1046,11 +1246,13 @@ function App() {
   const [toast, setToast] = useState('');
   const [installEvt, setInstallEvt] = useState(null);
   const [perm, setPerm] = useState(typeof Notification !== 'undefined' ? Notification.permission : 'unsupported');
+  const [online, setOnline] = useState(navigator.onLine !== false);
   const dataRef = useRef(st),
     sesiRef = useRef(sesi),
     antriRef = useRef(cache0.antrian || []),
     sibukRef = useRef(false),
-    ulangRef = useRef(null);
+    ulangRef = useRef(null),
+    jalanRef = useRef([]);
   dataRef.current = st;
   sesiRef.current = sesi;
   USERS = st.users || [];
@@ -1060,15 +1262,22 @@ function App() {
     id: sesi.user.username
   } : null;
   const simpanCache = () => {
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        sesi: sesiRef.current,
-        data: dataRef.current,
-        antrian: antriRef.current
-      }));
-    } catch (e) {
-      setToast('Memori HP penuh — sambungkan internet agar foto segera terkirim.');
-    }
+    const isi = {
+      sesi: sesiRef.current,
+      data: dataRef.current,
+      antrian: jalanRef.current.concat(antriRef.current)
+    }; // termasuk yang sedang dikirim
+    idbSet(CACHE_KEY, salin(isi)).then(() => {
+      try {
+        localStorage.removeItem(CACHE_KEY);
+      } catch (e) {}
+    }).catch(() => {
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(isi));
+      } catch (e) {
+        setToast('Memori HP penuh — sambungkan internet agar foto segera terkirim.');
+      }
+    });
   };
   useEffect(simpanCache, [st, sesi, sinkron]);
   useEffect(() => {
@@ -1095,17 +1304,18 @@ function App() {
     if (sibukRef.current || !sesiRef.current) return;
     if (!antriRef.current.length && !paksa) return;
     sibukRef.current = true;
-    const batch = antriRef.current.splice(0);
+    const batch = ambilPotongan(antriRef.current);
+    jalanRef.current = batch;
     setSinkron({
       status: 'sync',
-      antri: batch.length
+      antri: batch.length + antriRef.current.length
     });
     try {
       const r = await api({
         action: 'opsSync',
         token: sesiRef.current.token,
         ...gabungBatch(batch)
-      });
+      }, 120);
       if (!r.ok) {
         if (r.error === 'AUTH') {
           antriRef.current = batch.concat(antriRef.current);
@@ -1115,6 +1325,7 @@ function App() {
         throw new Error(r.error || 'respon tidak valid');
       }
       const idMap = r.idMap || {};
+      simpanFotoSendiri(batch.map(b => gantiTmp(b, idMap)), r.data);
       antriRef.current = antriRef.current.map(b => gantiTmp(b, idMap));
       const data = terapkanAntrian(r.data, antriRef.current);
       dataRef.current = data;
@@ -1132,15 +1343,19 @@ function App() {
         antri: antriRef.current.length,
         waktu: Date.now()
       });
+      setOnline(true);
+      if (!antriRef.current.length) setTimeout(() => siapkanOffline(dataRef.current, sesiRef.current.user).catch(() => {}), 1500);
     } catch (e) {
       antriRef.current = batch.concat(antriRef.current);
       setSinkron({
         status: 'offline',
         antri: antriRef.current.length
       });
+      if (navigator.onLine === false) setOnline(false);
       clearTimeout(ulangRef.current);
       ulangRef.current = setTimeout(() => kirim(true), 20000);
     } finally {
+      jalanRef.current = [];
       sibukRef.current = false;
       if (antriRef.current.length && sinkronOk()) setTimeout(() => kirim(), 200);
     }
@@ -1170,7 +1385,12 @@ function App() {
       }
     };
     if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', onMsg);
-    const onOnline = () => kirim(true);
+    const onOnline = () => {
+      setOnline(true);
+      kirim(true);
+    };
+    const onOffline = () => setOnline(false);
+    window.addEventListener('offline', onOffline);
     const onVis = () => {
       if (document.visibilityState === 'visible') kirim(true);
     };
@@ -1188,6 +1408,7 @@ function App() {
       window.removeEventListener('hashchange', openHash);
       if (navigator.serviceWorker) navigator.serviceWorker.removeEventListener('message', onMsg);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
       document.removeEventListener('visibilitychange', onVis);
       clearInterval(iv);
     };
@@ -1207,11 +1428,30 @@ function App() {
       }));
       if (out.length) changes[col] = out;
     });
-    antriRef.current.push({
+    // rekaman yang sudah menunggu di antrian cukup diperbarui di tempatnya (foto tidak tersimpan berkali-kali)
+    Object.keys(changes).forEach(col => {
+      changes[col] = changes[col].filter(rec => {
+        for (const e of antriRef.current) {
+          const arr = (e.changes || {})[col] || [];
+          const i = arr.findIndex(x => x.id === rec.id);
+          if (i >= 0) {
+            arr[i] = {
+              ...rec,
+              _base: arr[i]._base
+            };
+            return false;
+          }
+        }
+        return true;
+      });
+      if (!changes[col].length) delete changes[col];
+    });
+    if (Object.keys(changes).length || n.length) antriRef.current.push({
       changes,
       notifs: n.map(x => ({
         ...x,
-        dari: me.id
+        dari: me.id,
+        cid: tmpId()
       })),
       dibaca: []
     });
@@ -1222,7 +1462,7 @@ function App() {
       antri: antriRef.current.length
     }));
     kirim();
-    if (pesan) setToast(pesan);
+    if (pesan) setToast(navigator.onLine === false ? 'Tersimpan di HP (offline) — dikirim otomatis saat ada internet' : pesan);
   };
   const tandaiDibaca = ids => {
     if (!ids.length) return;
@@ -1492,7 +1732,7 @@ function App() {
         password
       });
     } catch (e) {
-      return 'Tidak dapat terhubung ke server. Periksa koneksi internet.';
+      return navigator.onLine === false ? 'Tidak ada internet. Masuk pertama kali butuh internet.' : 'Tidak dapat terhubung ke server. Periksa koneksi internet.';
     }
     if (!r.ok) return r.error === 'AUTH' ? 'Username atau password salah.' : r.error === 'BUKAN_AKUN_APLIKASI' ? 'Akun ini untuk portal keuangan di website, bukan untuk aplikasi.' : 'Server: ' + r.error;
     const s2 = {
@@ -1500,19 +1740,35 @@ function App() {
       user: r.user,
       pushKey: r.pushKey
     };
-    antriRef.current = [];
+    let pulih = [];
+    try {
+      const t = await idbGet(TERTUNDA_KEY);
+      if (t && t.username === r.user.username && Array.isArray(t.antrian)) pulih = t.antrian;
+    } catch (e) {}
+    antriRef.current = pulih;
     sesiRef.current = s2;
-    dataRef.current = r.data;
+    const data0 = pulih.length ? terapkanAntrian(r.data, pulih) : r.data;
+    dataRef.current = data0;
     setSesi(s2);
-    setSt(r.data);
+    setSt(data0);
     setView({
       name: 'home'
     });
     setSinkron({
       status: 'ok',
-      antri: 0,
+      antri: pulih.length,
       waktu: Date.now()
     });
+    try {
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+    } catch (e) {}
+    if (pulih.length) {
+      idbSet(TERTUNDA_KEY, null).catch(() => {});
+      setTimeout(() => {
+        kirim();
+        setToast(`${pulih.length} pekerjaan yang belum terkirim sedang dikirim`);
+      }, 300);
+    }
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') daftarPush(s2).catch(() => {});
     return '';
   };
@@ -1536,7 +1792,12 @@ function App() {
     bersihkan();
   };
   const keluarPaksa = () => {
-    setToast('Sesi berakhir (password diganti atau akun dihapus). Silakan masuk lagi.');
+    const sisa = antriRef.current;
+    if (sisa.length && sesiRef.current) idbSet(TERTUNDA_KEY, {
+      username: sesiRef.current.user.username,
+      antrian: salin(sisa)
+    }).catch(() => {});
+    setToast(sisa.length ? 'Sesi berakhir. Masuk lagi dengan akun yang sama — pekerjaan yang belum terkirim akan dikirim otomatis.' : 'Sesi berakhir (password diganti atau akun dihapus). Silakan masuk lagi.');
     bersihkan();
   };
   if (!me) return /*#__PURE__*/React.createElement(Login, {
@@ -1741,7 +2002,17 @@ function App() {
     className: "w-8 h-8 rounded-full bg-red-600 font-black text-sm"
   }, me.name[0]))), /*#__PURE__*/React.createElement("div", {
     className: "hazard h-1"
-  })), /*#__PURE__*/React.createElement("main", {
+  })), (!online || sinkron.status === 'offline') && /*#__PURE__*/React.createElement("div", {
+    role: "status",
+    className: "sticky z-20 bg-amber-100 border-b border-amber-300 text-amber-900",
+    style: {
+      top: 'calc(3.75rem + env(safe-area-inset-top))'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "max-w-lg mx-auto px-4 py-2 text-xs font-semibold flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "w-2 h-2 rounded-full bg-amber-500 shrink-0"
+  }), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", null, "Mode offline"), " \u2014 aplikasi tetap bisa dipakai. ", sinkron.antri > 0 ? `${sinkron.antri} perubahan tersimpan di HP, ` : 'Data baru ', "dikirim otomatis saat ada internet."))), /*#__PURE__*/React.createElement("main", {
     className: "max-w-lg mx-auto px-4 pt-4 pb-28"
   }, body), /*#__PURE__*/React.createElement("nav", {
     className: "fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200",
@@ -1750,8 +2021,8 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "max-w-lg mx-auto grid grid-cols-5"
-  }, NAV.map(_ref16 => {
-    let [k, l, ic, fab] = _ref16;
+  }, NAV.map(_ref18 => {
+    let [k, l, ic, fab] = _ref18;
     const aktif = v === k || k === 'aju' && v === 'formAju' || k === 'tugas' && me.role !== 'teknisi' && v === 'buatTugas' && !NAV.some(n => n[0] === 'buatTugas');
     if (fab) return /*#__PURE__*/React.createElement("button", {
       key: k,
@@ -1788,10 +2059,10 @@ function App() {
 }
 
 // ================================================================== masuk
-function Login(_ref17) {
+function Login(_ref19) {
   let {
     onMasuk
-  } = _ref17;
+  } = _ref19;
   const [f, setF] = useState({
     username: '',
     password: ''
@@ -1870,7 +2141,9 @@ function Login(_ref17) {
     type: "submit",
     disabled: proses,
     className: "w-full py-3.5 rounded-xl bg-red-600 font-black disabled:opacity-60"
-  }, proses ? 'Memeriksa…' : 'Masuk')), /*#__PURE__*/React.createElement("p", {
+  }, proses ? 'Memeriksa…' : 'Masuk')), navigator.onLine === false && /*#__PURE__*/React.createElement("p", {
+    className: "mt-4 text-xs text-amber-300 font-semibold"
+  }, "Tidak ada internet. Masuk pertama kali butuh internet \u2014 setelah itu aplikasi bisa dipakai tanpa internet."), /*#__PURE__*/React.createElement("p", {
     className: "mt-4 text-xs text-slate-500"
   }, "Akun dibuat oleh admin di portal viopran.com (menu Pengguna). Lupa password? Hubungi admin.")));
 }
@@ -1894,11 +2167,11 @@ const WARNA = {
   violet: 'bg-violet-50 text-violet-600',
   slate: 'bg-slate-100 text-slate-600'
 };
-function Sambutan(_ref18) {
+function Sambutan(_ref20) {
   let {
     me,
     angka
-  } = _ref18;
+  } = _ref20;
   return /*#__PURE__*/React.createElement("section", {
     className: "rounded-3xl bg-ink text-white p-5 relative overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1913,8 +2186,8 @@ function Sambutan(_ref18) {
     className: "inline-block mt-2 px-2.5 py-1 rounded-full bg-white/10 text-[11px] font-bold tracking-wide"
   }, ROLES[me.role]), angka && angka.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: `grid gap-3 mt-4 ${angka.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`
-  }, angka.map(_ref19 => {
-    let [l, v] = _ref19;
+  }, angka.map(_ref21 => {
+    let [l, v] = _ref21;
     return /*#__PURE__*/React.createElement("div", {
       key: l,
       className: "bg-white/5 border border-white/10 rounded-2xl px-3 py-2.5"
@@ -1927,10 +2200,10 @@ function Sambutan(_ref18) {
 }
 
 // Daftar "Perlu tindakan": kalimat jelas + satu ketukan menuju layarnya
-function Tindakan(_ref20) {
+function Tindakan(_ref22) {
   let {
     items
-  } = _ref20;
+  } = _ref22;
   const [lebih, setLebih] = useState(false);
   return /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement("h3", {
     className: "text-sm font-black text-slate-800 mb-2"
@@ -1974,10 +2247,10 @@ function Tindakan(_ref20) {
 }
 
 // Menu utama: ubin besar ber-ikon dengan penjelasan singkat
-function MenuUtama(_ref21) {
+function MenuUtama(_ref23) {
   let {
     items
-  } = _ref21;
+  } = _ref23;
   return /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement("h3", {
     className: "text-sm font-black text-slate-800 mb-2"
   }, "Menu"), /*#__PURE__*/React.createElement("div", {
@@ -2004,11 +2277,11 @@ const PANDUAN = {
   manager: [['Jadwalkan', 'Laporan kerja teknisi masuk ke “Pekerjaan Teknisi”. Tekan “Jadwalkan” untuk membuat tugas pemeriksaan.'], ['Buat tugas', 'Atau tekan tombol merah “Buat Tugas”: isi tempat, tanggal, APAR, dan pilih teknisi.'], ['Pantau', 'Progres tiap pemeriksaan terlihat di menu Pemeriksaan (jumlah APAR yang sudah diperiksa).'], ['Periksa gaji', 'Di menu Persetujuan, periksa gaji teknisi lalu “Teruskan ke Direktur” atau “Kembalikan”.'], ['Ingatkan Direktur', 'Jika pembayaran tertunda, tekan “Ingatkan Direktur” — HP Direktur berbunyi.']],
   direktur: [['Cek pembayaran', 'Menu Pembayaran berisi gaji dan pembayaran yang sudah diperiksa Manager.'], ['Bayar', 'Buka pengajuan, isi tanggal & referensi, foto bukti, lalu “Tandai dibayar”.'], ['Otomatis tercatat', 'Pembayaran langsung masuk Kas Keluar dan dikirim ke portal viopran.com.'], ['Pantau', 'Progres pemeriksaan dan arsip laporan PDF per klien bisa dilihat kapan saja.']]
 };
-function Panduan(_ref22) {
+function Panduan(_ref24) {
   let {
     role,
     onTutup
-  } = _ref22;
+  } = _ref24;
   return /*#__PURE__*/React.createElement("section", {
     className: "bg-white rounded-2xl border-2 border-red-100 p-4"
   }, /*#__PURE__*/React.createElement("div", {
@@ -2022,8 +2295,8 @@ function Panduan(_ref22) {
     className: "text-sm"
   }, "Cara memakai aplikasi (", ROLES[role], ")")), /*#__PURE__*/React.createElement("ol", {
     className: "mt-3 space-y-2.5"
-  }, PANDUAN[role].map((_ref23, i) => {
-    let [j, k] = _ref23;
+  }, PANDUAN[role].map((_ref25, i) => {
+    let [j, k] = _ref25;
     return /*#__PURE__*/React.createElement("li", {
       key: j,
       className: "flex gap-3"
@@ -2039,10 +2312,10 @@ function Panduan(_ref22) {
     className: "mt-4 w-full py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold"
   }, "Mengerti, sembunyikan panduan"));
 }
-function AjakNotif(_ref24) {
+function AjakNotif(_ref26) {
   let {
     ctx
-  } = _ref24;
+  } = _ref26;
   if (!(ctx.perm === 'default' || ctx.installEvt)) return null;
   return /*#__PURE__*/React.createElement("div", {
     className: "bg-white border border-slate-200 rounded-2xl p-4 flex gap-3 items-start"
@@ -2064,14 +2337,14 @@ function AjakNotif(_ref24) {
     className: "px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold"
   }, "Pasang aplikasi"))));
 }
-const Kartu = _ref25 => {
+const Kartu = _ref27 => {
   let {
     judul,
     nilai,
     sub,
     onClick,
     tone
-  } = _ref25;
+  } = _ref27;
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     className: "text-left bg-white rounded-2xl border border-slate-200 p-4 active:bg-slate-50"
@@ -2083,41 +2356,41 @@ const Kartu = _ref25 => {
     className: "text-[11px] text-slate-500 mt-0.5"
   }, sub));
 };
-const PanduanBeranda = _ref26 => {
+const PanduanBeranda = _ref28 => {
   let {
     ctx
-  } = _ref26;
+  } = _ref28;
   return ctx.panduanTampil ? /*#__PURE__*/React.createElement(Panduan, {
     role: ctx.me.role,
     onTutup: ctx.tutupPanduan
   }) : null;
 };
-const Bagian = _ref27 => {
+const Bagian = _ref29 => {
   let {
     judul,
     aksi,
     children
-  } = _ref27;
+  } = _ref29;
   return /*#__PURE__*/React.createElement("section", null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between mb-2"
   }, /*#__PURE__*/React.createElement("h3", {
     className: "text-sm font-black text-slate-800"
   }, judul), aksi), children);
 };
-const LinkKecil = _ref28 => {
+const LinkKecil = _ref30 => {
   let {
     onClick,
     children
-  } = _ref28;
+  } = _ref30;
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     className: "text-xs font-bold text-red-600"
   }, children);
 };
-function BerandaTeknisi(_ref29) {
+function BerandaTeknisi(_ref31) {
   let {
     ctx
-  } = _ref29;
+  } = _ref31;
   const {
     st,
     me,
@@ -2202,10 +2475,10 @@ function BerandaTeknisi(_ref29) {
     ctx: ctx
   }));
 }
-function BerandaManager(_ref30) {
+function BerandaManager(_ref32) {
   let {
     ctx
-  } = _ref30;
+  } = _ref32;
   const {
     st,
     me,
@@ -2323,10 +2596,10 @@ function BerandaManager(_ref30) {
     })
   })))));
 }
-function BerandaDirektur(_ref31) {
+function BerandaDirektur(_ref33) {
   let {
     ctx
-  } = _ref31;
+  } = _ref33;
   const {
     st,
     me,
@@ -2403,11 +2676,11 @@ function BerandaDirektur(_ref31) {
 }
 
 // ================================================================== kartu
-const KartuTugas = _ref32 => {
+const KartuTugas = _ref34 => {
   let {
     t,
     onClick
-  } = _ref32;
+  } = _ref34;
   const p = progres(t);
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
@@ -2435,11 +2708,11 @@ const KartuTugas = _ref32 => {
     className: "text-xs font-bold tabular-nums text-slate-600"
   }, p.d, "/", p.n, " APAR")));
 };
-const KartuPekerjaan = _ref33 => {
+const KartuPekerjaan = _ref35 => {
   let {
     p,
     onClick
-  } = _ref33;
+  } = _ref35;
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     className: "w-full text-left bg-white rounded-2xl border border-slate-200 p-4 active:bg-slate-50"
@@ -2459,11 +2732,11 @@ const KartuPekerjaan = _ref33 => {
     className: `px-2 py-0.5 rounded-full text-[11px] font-bold border ${TONE.rose}`
   }, "Belum dijadwalkan")));
 };
-const KartuAju = _ref34 => {
+const KartuAju = _ref36 => {
   let {
     a,
     onClick
-  } = _ref34;
+  } = _ref36;
   return /*#__PURE__*/React.createElement("button", {
     onClick: onClick,
     className: "w-full text-left bg-white rounded-2xl border border-slate-200 p-4 active:bg-slate-50"
@@ -2486,10 +2759,10 @@ const KartuAju = _ref34 => {
 };
 
 // ================================================================== tugas pemeriksaan
-function DaftarTugas(_ref35) {
+function DaftarTugas(_ref37) {
   let {
     ctx
-  } = _ref35;
+  } = _ref37;
   const {
     st,
     me,
@@ -2511,8 +2784,8 @@ function DaftarTugas(_ref35) {
     className: "px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-bold shrink-0"
   }, "+ Buat tugas")), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 bg-slate-200 rounded-xl p-1 text-sm font-bold"
-  }, [['aktif', 'Aktif'], ['selesai', 'Selesai']].map(_ref36 => {
-    let [k, l] = _ref36;
+  }, [['aktif', 'Aktif'], ['selesai', 'Selesai']].map(_ref38 => {
+    let [k, l] = _ref38;
     return /*#__PURE__*/React.createElement("button", {
       key: k,
       onClick: () => setTab(k),
@@ -2533,11 +2806,11 @@ function DaftarTugas(_ref35) {
     className: btnGaris
   }, "Lihat pekerjaan refilling/pengadaan teknisi"));
 }
-function FormTugas(_ref37) {
+function FormTugas(_ref39) {
   let {
     ctx,
     dari
-  } = _ref37;
+  } = _ref39;
   const {
     st,
     go
@@ -2675,11 +2948,11 @@ function FormTugas(_ref37) {
     d: I.send
   }), " Kirim tugas ke teknisi"));
 }
-function DetailTugas(_ref38) {
+function DetailTugas(_ref40) {
   let {
     ctx,
     id
-  } = _ref38;
+  } = _ref40;
   const {
     st,
     me,
@@ -2856,14 +3129,14 @@ function DetailTugas(_ref38) {
     list: t.history
   })));
 }
-function FormUnit(_ref39) {
+function FormUnit(_ref41) {
   let {
     t,
     idx,
     me,
     onBatal,
     onSimpan
-  } = _ref39;
+  } = _ref41;
   const [u, setU] = useState(() => ({
     ...t.units[idx],
     foto: t.units[idx].foto || []
@@ -2991,10 +3264,10 @@ function FormUnit(_ref39) {
 }
 
 // ================================================================== pekerjaan refilling / pengadaan
-function FormPekerjaan(_ref40) {
+function FormPekerjaan(_ref42) {
   let {
     ctx
-  } = _ref40;
+  } = _ref42;
   const {
     go
   } = ctx;
@@ -3103,10 +3376,10 @@ function FormPekerjaan(_ref40) {
     d: I.send
   }), " Simpan pekerjaan"));
 }
-function DaftarPekerjaan(_ref41) {
+function DaftarPekerjaan(_ref43) {
   let {
     ctx
-  } = _ref41;
+  } = _ref43;
   const {
     st,
     me,
@@ -3131,11 +3404,11 @@ function DaftarPekerjaan(_ref41) {
     })
   }))));
 }
-function DetailPekerjaan(_ref42) {
+function DetailPekerjaan(_ref44) {
   let {
     ctx,
     id
-  } = _ref42;
+  } = _ref44;
   const {
     st,
     me,
@@ -3223,10 +3496,10 @@ function DetailPekerjaan(_ref42) {
 }
 
 // ================================================================== pengajuan gaji / pembayaran
-function DaftarAju(_ref43) {
+function DaftarAju(_ref45) {
   let {
     ctx
-  } = _ref43;
+  } = _ref45;
   const {
     st,
     me,
@@ -3264,8 +3537,8 @@ function DaftarAju(_ref43) {
     size: 16
   }), " Ingatkan Direktur (", st.aju.filter(a => a.status === 'menunggu_direktur').length, " menunggu)"), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 bg-slate-200 rounded-xl p-1 text-sm font-bold"
-  }, [['proses', 'Dalam proses'], ['selesai', 'Selesai']].map(_ref44 => {
-    let [k, l] = _ref44;
+  }, [['proses', 'Dalam proses'], ['selesai', 'Selesai']].map(_ref46 => {
+    let [k, l] = _ref46;
     return /*#__PURE__*/React.createElement("button", {
       key: k,
       onClick: () => setTab(k),
@@ -3283,12 +3556,12 @@ function DaftarAju(_ref43) {
     })
   }))));
 }
-function FormAju(_ref45) {
+function FormAju(_ref47) {
   let {
     ctx,
     jenis,
     editId
-  } = _ref45;
+  } = _ref47;
   const {
     st,
     me,
@@ -3515,11 +3788,11 @@ function FormAju(_ref45) {
     d: I.send
   }), " ", editId ? 'Ajukan ulang' : 'Kirim pengajuan'));
 }
-function DetailAju(_ref46) {
+function DetailAju(_ref48) {
   let {
     ctx,
     id
-  } = _ref46;
+  } = _ref48;
   const {
     st,
     me,
@@ -3759,10 +4032,10 @@ function DetailAju(_ref46) {
     list: a.history
   })));
 }
-const Riwayat = _ref47 => {
+const Riwayat = _ref49 => {
   let {
     list
-  } = _ref47;
+  } = _ref49;
   return /*#__PURE__*/React.createElement("ol", {
     className: "relative border-l-2 border-slate-200 ml-1.5 space-y-3"
   }, (list || []).map((h, i) => /*#__PURE__*/React.createElement("li", {
@@ -3780,10 +4053,10 @@ const Riwayat = _ref47 => {
 };
 
 // ================================================================== kas keluar (sinkron ke website)
-function KasKeluar(_ref48) {
+function KasKeluar(_ref50) {
   let {
     ctx
-  } = _ref48;
+  } = _ref50;
   const {
     st
   } = ctx;
@@ -3829,10 +4102,10 @@ function KasKeluar(_ref48) {
 }
 
 // ================================================================== arsip PDF (Google Drive)
-function Arsip(_ref49) {
+function Arsip(_ref51) {
   let {
     ctx
-  } = _ref49;
+  } = _ref51;
   const {
     st,
     go
@@ -3896,12 +4169,12 @@ function Arsip(_ref49) {
 }
 
 // ================================================================== laporan (tampilan cetak / PDF)
-function Laporan(_ref50) {
+function Laporan(_ref52) {
   let {
     doc,
     st,
     onTutup
-  } = _ref50;
+  } = _ref52;
   const kop = (judul, nomor) => /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between items-end border-b-[3px] border-slate-900 pb-3 mb-4"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4085,12 +4358,12 @@ function Laporan(_ref50) {
 }
 
 // ================================================================== notifikasi & akun
-function Notifikasi(_ref51) {
+function Notifikasi(_ref53) {
   let {
     list,
     buka,
     bacaSemua
-  } = _ref51;
+  } = _ref53;
   return /*#__PURE__*/React.createElement("div", {
     className: "space-y-3"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4118,11 +4391,11 @@ function Notifikasi(_ref51) {
     className: "block text-[11px] text-slate-400 mt-1"
   }, fmtTime(n.t))))));
 }
-function Profil(_ref52) {
+function Profil(_ref54) {
   let {
     ctx,
     keluar
-  } = _ref52;
+  } = _ref54;
   const [panduan, setPanduan] = useState(false);
   const [uji, setUji] = useState(false);
   const {
@@ -4209,7 +4482,7 @@ function Profil(_ref52) {
     minute: '2-digit'
   })), /*#__PURE__*/React.createElement("p", {
     className: "text-[11px] text-slate-500 mt-1.5"
-  }, "Data disimpan di server perusahaan dan tersambung dengan portal viopran.com. Saat tidak ada sinyal, pekerjaan tetap bisa diisi dan dikirim otomatis begitu internet kembali."), /*#__PURE__*/React.createElement("button", {
+  }, "Data disimpan di server perusahaan dan tersambung dengan portal viopran.com. Tanpa sinyal pun semua menu tetap bisa dipakai: tugas, pemeriksaan, foto kamera, laporan kerja, pengajuan dan pembayaran tersimpan di HP lalu dikirim otomatis begitu internet kembali. Foto & PDF terbaru juga disimpan di HP agar bisa dibuka saat offline."), /*#__PURE__*/React.createElement("button", {
     onClick: () => ctx.kirim(true),
     className: btnGaris + ' mt-2'
   }, "Muat ulang data")), /*#__PURE__*/React.createElement("button", {
@@ -4240,5 +4513,7 @@ function Profil(_ref52) {
     className: "text-center text-[11px] text-slate-400"
   }, "NVP Operasional \xB7 PT Nuri Vira Pratama"));
 }
-ReactDOM.createRoot(document.getElementById('root')).render( /*#__PURE__*/React.createElement(App, null));
+muatAwal().then(awal => ReactDOM.createRoot(document.getElementById('root')).render( /*#__PURE__*/React.createElement(App, {
+  awal: awal
+})));
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

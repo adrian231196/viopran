@@ -123,7 +123,7 @@ function opsLoad_() {
   var D = {};
   try { D = raw ? JSON.parse(raw) : {}; } catch (e) { throw new Error('Data aplikasi tidak dapat dibaca.'); }
   OPS_COLS.concat(['notifs', 'subs']).forEach(function (k) { if (!Array.isArray(D[k])) D[k] = []; });
-  D.seq = D.seq || {}; D.sessions = D.sessions || {};
+  D.seq = D.seq || {}; D.sessions = D.sessions || {}; D.tmpMap = D.tmpMap || {};
   return D;
 }
 function opsSave_(D) {
@@ -205,6 +205,18 @@ function opsSync_(D, user, body) {
     (inc.history || []).forEach(function (h) { if (h && h.by === me && !ada[key(h)]) { srv.history = (srv.history || []).concat([{ t: String(h.t), by: me, action: String(h.action).slice(0, 200), note: String(h.note || '').slice(0, 500) }]); } });
   };
   var str = function (v, n) { return String(v == null ? '' : v).slice(0, n || 300); };
+  // ---- kiriman ulang (HP kehilangan sinyal sebelum menerima jawaban): data yang sudah dibuat tidak dibuat dua kali
+  var batas = Date.now() - 45 * 864e5;
+  Object.keys(D.tmpMap).forEach(function (k) { if ((D.tmpMap[k].t || 0) < batas) delete D.tmpMap[k]; });
+  var ingatTmp = function (tmp, id) { D.tmpMap[tmp] = { id: id, u: me, t: Date.now() }; };
+  ['pekerjaan', 'tugas', 'aju'].forEach(function (col) {
+    (ch[col] || []).forEach(function (rec) {
+      var k = rec && D.tmpMap[rec.id];
+      if (!k || k.u !== me) return;
+      idMap[rec.id] = k.id; rec.id = k.id;
+      var srv = cari(col, k.id); if (srv) rec._base = srv.rev;
+    });
+  });
 
   // ---- pekerjaan (refilling / pengadaan)
   (ch.pekerjaan || []).forEach(function (p) {
@@ -215,7 +227,7 @@ function opsSync_(D, user, body) {
       var rec = { id: opsNextNo_(D, 'PKJ', tgl), tanggal: tgl, jenis: p.jenis === 'Pengadaan' ? 'Pengadaan' : 'Refilling', konsumen: str(p.konsumen, 120), alamat: str(p.alamat, 200),
         rows: opsRows_(p.rows), teknisiId: me, createdAt: now, taskId: null, rev: 1 };
       rec.foto = opsSimpanFoto_(p.foto, rec.konsumen, 6);
-      idMap[p.id] = rec.id;
+      idMap[p.id] = rec.id; ingatTmp(p.id, rec.id);
       D.pekerjaan.unshift(rec);
       events.push({ jenis: 'pdfPekerjaan', id: rec.id });
     } else if (role === 'manager' && p.taskId && !srv.taskId && String(p.taskId).indexOf('tmp-') !== 0) {
@@ -236,7 +248,7 @@ function opsSync_(D, user, body) {
         jumlah: units.length, type: str(t.type, 60), berat: str(t.berat, 30), rows: opsRows_(t.rows), teknisiIds: ids, catatan: str(t.catatan, 500), units: units,
         sumber: t.sumber ? map(t.sumber) : null, status: 'baru', dibuatOleh: me, history: [], rev: 1 };
       gabungRiwayat(rec, t);
-      idMap[t.id] = rec.id;
+      idMap[t.id] = rec.id; ingatTmp(t.id, rec.id);
       D.tugas.unshift(rec);
       if (rec.sumber) { var pk = cari('pekerjaan', rec.sumber); if (pk && (!pk.taskId || String(pk.taskId).indexOf('tmp-') === 0)) { pk.taskId = rec.id; pk.rev = (pk.rev || 0) + 1; } }
       return;
@@ -279,10 +291,11 @@ function opsSync_(D, user, body) {
         status: role === 'teknisi' ? 'cek_manager' : 'menunggu_direktur', createdAt: now, history: [], rev: 1 };
       rec.lampiran = opsSimpanFoto_(a.lampiran, 'Pengajuan', 4);
       gabungRiwayat(rec, a);
-      idMap[a.id] = rec.id;
+      idMap[a.id] = rec.id; ingatTmp(a.id, rec.id);
       D.aju.unshift(rec);
       return;
     }
+    if (a.status === srv.status) return; // tidak ada perubahan status / kiriman ulang
     if (Number(a._base || 0) !== Number(srv.rev || 0)) { conflicts.push({ col: 'aju', id: srv.id, pesan: 'Pengajuan sudah diubah orang lain — data dimuat ulang.' }); return; }
     var boleh = ((OPS_TRANSISI_AJU[role] || {})[srv.status] || []);
     var pemilik = srv.pemohonId === me;
@@ -312,9 +325,11 @@ function opsSync_(D, user, body) {
   var pushes = [];
   (body.notifs || []).slice(0, 30).forEach(function (n) {
     if (!n || OPS_ROLES.indexOf(n.toRole) < 0) return;
+    var cid = n.cid ? str(n.cid, 40) : '';
+    if (cid && D.notifs.some(function (x) { return x.cid === cid; })) return; // kiriman ulang
     var link = String(n.link || '').replace(/(tmp-[a-z0-9]+)/g, function (m) { return map(m); });
     var rec = { id: opsRandomHex_(8), t: now, toRole: n.toRole, toUser: n.toUser ? String(n.toUser) : '', dari: me, title: str(n.title, 120).replace(/tmp-[a-z0-9]+/g, function (m) { return map(m); }),
-      body: str(n.body, 300).replace(/tmp-[a-z0-9]+/g, function (m) { return map(m); }), link: link, readBy: [] };
+      body: str(n.body, 300).replace(/tmp-[a-z0-9]+/g, function (m) { return map(m); }), link: link, readBy: [], cid: cid };
     D.notifs.unshift(rec); pushes.push(rec);
   });
   // ---- tanda sudah dibaca

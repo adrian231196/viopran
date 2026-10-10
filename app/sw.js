@@ -1,5 +1,5 @@
 /* NVP Operasional — service worker: bisa dibuka offline + notifikasi HP (tampil walau layar terkunci) */
-const CACHE = 'nvp-ops-v6';
+const CACHE = 'nvp-ops-v7';
 const FILES = ['./', 'index.html', 'app.js', 'styles.css', 'manifest.webmanifest', '../config.js', 'vendor/react.production.min.js', 'vendor/react-dom.production.min.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png', 'icons/apple-touch-icon.png'];
 const SIMPAN = ['nvp-ops-meta', 'nvp-ops-berkas']; // jangan dihapus saat pembaruan
 
@@ -10,9 +10,19 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  // jaringan dulu (agar versi baru cepat terlihat), cadangan dari cache saat offline
-  e.respondWith(fetch(req).then(res => { const copy = res.clone(); if (res.ok) caches.open(CACHE).then(c => c.put(req, copy)); return res; })
-    .catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
+  // Jaringan dulu agar versi baru cepat terlihat; jika sinyal lemah (>3,5 detik) atau offline, pakai salinan di HP
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    const dariJaringan = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; });
+    const tunggu = new Promise(r => setTimeout(r, 3500, null));
+    try {
+      const res = await Promise.race([dariJaringan, tunggu]);
+      if (res) return res;
+    } catch (err) {}
+    const simpanan = await cache.match(req, { ignoreSearch: true }) || (req.mode === 'navigate' ? await cache.match('index.html') : null);
+    if (simpanan) { e.waitUntil(dariJaringan.catch(() => {})); return simpanan; }
+    return dariJaringan.catch(() => cache.match('index.html'));
+  })());
 });
 
 // ---- Notifikasi dari server (Web Push). Server hanya mengirim "ketukan";
