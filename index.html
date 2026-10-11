@@ -357,7 +357,7 @@
 
     // Akun kas perusahaan & rekening tujuan pembayaran invoice
     const AKUN_KAS = {
-      tunai: { kode: '1-101', label: 'Kas Tunai', detail: 'BCA 0941426696 a/n Adrian Anugerah Putra' },
+      tunai: { kode: '1-101', label: 'Kas Tunai', detail: '' },
       bank:  { kode: '1-102', label: 'Kas Bank',  detail: 'Bank DKI 50308011105 a/n PT Nuri Vira Pratama' },
     };
     const REKENING = {
@@ -365,6 +365,7 @@
       dki: { bank: 'DKI', norek: '50308011105', an: 'PT Nuri Vira Pratama', akun: 'bank' },
     };
     const akunAman = (a) => (a === 'tunai' ? 'tunai' : 'bank');
+    const namaKas = (k) => { const a = AKUN_KAS[akunAman(k)]; return a.detail ? `${a.label} (${a.detail.split(' a/n')[0]})` : a.label; };
     // Invoice lama tanpa pilihan rekening: mengikuti aturan lama (PPN → Bank DKI, non-PPN → BCA)
     const invRek = (inv) => (inv && REKENING[inv.bayarKe]) ? inv.bayarKe : (inv && inv.usePpn ? 'dki' : 'bca');
     const invAkun = (inv) => REKENING[invRek(inv)].akun;
@@ -431,9 +432,18 @@
     const expIsUtang = (e) => e && e.paymentStatus === 'utang';
     // Dana talangan: beban dibayar dulu oleh pihak ketiga → kas PT belum berkurang, PT berutang ke pihak ketiga sampai dikembalikan
     const expIsTalangan = (e) => e && e.paymentStatus === 'talangan';
-    const expPaidDate = (e) => !e ? '' : ((expIsUtang(e) || expIsTalangan(e)) ? (e.paidDate ? maxDate(e.date, e.paidDate) : '') : (e.date || ''));
+    // Campuran: sebagian dibayar langsung dari kas, sisanya ditalangi pihak ketiga (menjadi utang dana talangan)
+    const expIsCampuran = (e) => e && e.paymentStatus === 'campuran';
+    const expAdaTalangan = (e) => expIsTalangan(e) || expIsCampuran(e);
+    const expPaidDate = (e) => !e ? '' : ((expIsUtang(e) || expAdaTalangan(e)) ? (e.paidDate ? maxDate(e.date, e.paidDate) : '') : (e.date || ''));
     const namaPihak = (e) => String((e && e.talanganDari) || '').trim() || 'Pihak ketiga (tanpa nama)';
     const expGross = (e) => num(e && e.amount) + num(e && e.ppnMasukan);
+    // porsi yang langsung keluar dari kas saat beban dicatat, dan dari kas mana
+    const expKasLangsung = (e) => expIsCampuran(e) ? Math.min(expGross(e), Math.max(0, num(e.bayarKas))) : (expIsUtang(e) || expIsTalangan(e)) ? 0 : expGross(e);
+    const expAkunLangsung = (e) => expIsCampuran(e) ? akunAman(e.akunKasLangsung) : akunAman(e && e.akunKas);
+    // porsi dana talangan (utang ke pihak ketiga) dan utang pemasok; keduanya dibayar kemudian (paidDate) dari kas e.akunKas
+    const expTalanganNominal = (e) => expIsTalangan(e) ? expGross(e) : expIsCampuran(e) ? expGross(e) - expKasLangsung(e) : 0;
+    const expSisaNominal = (e) => (expIsUtang(e) ? expGross(e) : 0) + expTalanganNominal(e);
 
     function penyusutanKumulatif(asset, sampaiTahun) {
       const k = KELOMPOK_HARTA[asset && asset.kelompok] || KELOMPOK_HARTA.k1;
@@ -523,7 +533,8 @@
         const sd = (d) => d && d <= batas;
         return (akun === 'tunai' ? O.kasTunai : O.kas)
           + invoices.filter(i => invAkun(i) === akun && sd(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0)
-          - expenses.filter(e => expAkun(e) === akun && sd(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0)
+          - expenses.reduce((s, e) => s + (expAkunLangsung(e) === akun && sd(e.date) ? expKasLangsung(e) : 0)
+              + (expAkun(e) === akun && expSisaNominal(e) && sd(e.paidDate ? maxDate(e.date, e.paidDate) : '') ? expSisaNominal(e) : 0), 0)
           - assets.filter(a => asetAkun(a) === akun && sd(a.date)).reduce((s, a) => s + num(a.cost), 0)
           + cashTx.filter(t => sd(t.date)).reduce((s, t) => {
             if (t.type === 'pindah_kas') return s + (txTujuan(t) === akun ? num(t.amount) : txAkun(t) === akun ? -num(t.amount) : 0);
@@ -543,13 +554,14 @@
       const akumulasi = O.akumPenyusutan + assets.reduce((s, a) => s + penyusutanKumulatif(a, Y), 0);
 
       const utangUsaha = O.utangUsaha - sumTx('bayar_utang_awal', upTo)
-        + expTercatat.filter(e => !expIsTalangan(e) && !upTo(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0);
+        + expTercatat.filter(e => expIsUtang(e) && !upTo(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0);
       // Utang dana talangan per pihak ketiga
       const talanganMap = {};
-      expenses.filter(e => expIsTalangan(e) && upTo(e.date)).forEach(e => {
+      expenses.filter(e => expAdaTalangan(e) && upTo(e.date) && expTalanganNominal(e) > 0).forEach(e => {
         const k = namaPihak(e); const t = talanganMap[k] = talanganMap[k] || { nama: k, total: 0, kembali: 0, sisa: 0, jumlah: 0 };
-        t.total += expGross(e); t.jumlah += 1;
-        if (upTo(expPaidDate(e))) t.kembali += expGross(e); else t.sisa += expGross(e);
+        const n = expTalanganNominal(e);
+        t.total += n; t.jumlah += 1;
+        if (upTo(expPaidDate(e))) t.kembali += n; else t.sisa += n;
       });
       const talanganPerPihak = Object.values(talanganMap).sort((a, b) => b.sisa - a.sisa || b.total - a.total);
       const utangTalangan = talanganPerPihak.reduce((s, t) => s + t.sisa, 0);
@@ -588,11 +600,11 @@
       // ---------- Laporan arus kas tahun Y (metode langsung) ----------
       const inY = (d) => inYear(d, Y);
       const txY = (type) => sumTx(type, inY);
-      const expKasY = expenses.filter(e => !expIsTalangan(e) && inY(expPaidDate(e)));
+      const bebanKasY = expenses.reduce((s, e) => s + (inY(e.date) ? expKasLangsung(e) : 0) + (expIsUtang(e) && inY(expPaidDate(e)) ? expGross(e) : 0), 0);
       const operasi = {
         dariPelanggan: invoices.filter(i => inY(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0) + txY('terima_piutang_awal'),
         lainLain: txY('pendapatan_lain') + txY('bunga_bank'),
-        keBebanPembelian: expKasY.reduce((s, e) => s + expGross(e), 0) + txY('bayar_utang_awal'),
+        keBebanPembelian: bebanKasY + txY('bayar_utang_awal'),
         pajak: txY('setor_ppn') + txY('setor_pph'),
       };
       operasi.net = operasi.dariPelanggan + operasi.lainLain - operasi.keBebanPembelian - operasi.pajak;
@@ -600,13 +612,13 @@
       investasi.net = -investasi.asetTetap;
       const pendanaan = {
         modal: txY('modal'), prive: txY('prive'), pinjamanMasuk: txY('pinjaman_masuk'), bayarPinjaman: txY('bayar_pinjaman'),
-        kembaliTalangan: expenses.filter(e => expIsTalangan(e) && inY(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0),
+        kembaliTalangan: expenses.filter(e => expAdaTalangan(e) && inY(expPaidDate(e))).reduce((s, e) => s + expTalanganNominal(e), 0),
       };
       pendanaan.net = pendanaan.modal - pendanaan.prive + pendanaan.pinjamanMasuk - pendanaan.bayarPinjaman - pendanaan.kembaliTalangan;
       const kasAwal = kasSampai(`${Y - 1}-12-31`);
       const kasAwalTunai = kasAkunSampai(`${Y - 1}-12-31`, 'tunai'), kasAwalBank = kasAkunSampai(`${Y - 1}-12-31`, 'bank');
       const pindahKas = cashTx.filter(t => t.type === 'pindah_kas' && inY(t.date)).reduce((s, t) => s + num(t.amount), 0);
-      const nonKasTalangan = expenses.filter(e => expIsTalangan(e) && inY(e.date)).reduce((s, e) => s + expGross(e), 0);
+      const nonKasTalangan = expenses.filter(e => expAdaTalangan(e) && inY(e.date)).reduce((s, e) => s + expTalanganNominal(e), 0);
       const arusKas = { operasi, investasi, pendanaan, kenaikan: operasi.net + investasi.net + pendanaan.net, kasAwal, kasAkhir: kas, nonKasTalangan, kasAwalTunai, kasAwalBank, kasAkhirTunai: kasTunai, kasAkhirBank: kasBank, pindahKas };
       arusKas.cocok = Math.abs(arusKas.kasAwal + arusKas.kenaikan - arusKas.kasAkhir) < 1;
 
@@ -641,7 +653,7 @@
     // jenis: aset/beban → saldo normal debit; liabilitas/ekuitas/pendapatan → saldo normal kredit
     function daftarAkun() {
       const A = [
-        ['1-101', 'Kas Tunai (BCA 0941426696 a/n Adrian Anugerah Putra)', 'aset'],
+        ['1-101', 'Kas Tunai', 'aset'],
         ['1-102', 'Kas Bank (Bank DKI 50308011105 a/n PT Nuri Vira Pratama)', 'aset'],
         ['1-103', 'Piutang usaha', 'aset'],
         ['1-104', 'Persediaan barang', 'aset'],
@@ -702,18 +714,17 @@
         const sub = num(i.subtotal), ppn = num(i.ppn), tot = num(i.total);
         tambah(i.date, i.id, `Penjualan — ${i.customer || ''}`, [['1-103', tot, 0], [i.usePpn ? '4-101' : '4-102', 0, tot - ppn], ['2-103', 0, ppn]], 1);
         const pd = invPaidDate(i);
-        if (pd) { const r = REKENING[invRek(i)]; tambah(pd, i.id, `Pelunasan invoice ${i.id} — ${i.customer || ''} (via ${r.bank} ${r.norek})`, [[kodeKas(r.akun), tot, 0], ['1-103', 0, tot]], 2); }
+        if (pd) { const r = REKENING[invRek(i)]; tambah(pd, i.id, `Pelunasan invoice ${i.id} — ${i.customer || ''}`, [[kodeKas(r.akun), tot, 0], ['1-103', 0, tot]], 2); }
       });
       // beban & pembelian
       expenses.forEach(e => {
-        const g = expGross(e), ket = e.desc || e.jenis || 'Pengeluaran';
-        const lawan = expIsTalangan(e) ? '2-102' : expIsUtang(e) ? '2-101' : kodeKas(expAkun(e));
-        const ketL = expIsTalangan(e) ? `${ket} (ditalangi ${namaPihak(e)})` : ket;
-        tambah(e.date, e.id || 'BEBAN', ketL, [[akunBeban(e), num(e.amount), 0], ['2-103', num(e.ppnMasukan), 0], [lawan, 0, g]], 3);
-        if (expIsTalangan(e) || expIsUtang(e)) {
-          const pd = expPaidDate(e);
-          if (pd) tambah(pd, e.id || 'BEBAN', expIsTalangan(e) ? `Pengembalian dana talangan ke ${namaPihak(e)} — ${ket}` : `Pelunasan utang — ${ket}`, [[lawan, g, 0], [kodeKas(expAkun(e)), 0, g]], 4);
-        }
+        const ket = e.desc || e.jenis || 'Pengeluaran';
+        const kasL = expKasLangsung(e), tal = expTalanganNominal(e), utg = expIsUtang(e) ? expGross(e) : 0;
+        const ketL = expIsTalangan(e) ? `${ket} (ditalangi ${namaPihak(e)})` : expIsCampuran(e) ? `${ket} (sebagian dari ${AKUN_KAS[expAkunLangsung(e)].label}, sebagian ditalangi ${namaPihak(e)})` : ket;
+        tambah(e.date, e.id || 'BEBAN', ketL, [[akunBeban(e), num(e.amount), 0], ['2-103', num(e.ppnMasukan), 0],
+          kasL ? [kodeKas(expAkunLangsung(e)), 0, kasL] : null, utg ? ['2-101', 0, utg] : null, tal ? ['2-102', 0, tal] : null], 3);
+        const sisa = utg + tal, pd = expPaidDate(e);
+        if (sisa && pd) tambah(pd, e.id || 'BEBAN', tal ? `Pengembalian dana talangan ke ${namaPihak(e)} — ${ket}` : `Pelunasan utang — ${ket}`, [[tal ? '2-102' : '2-101', sisa, 0], [kodeKas(expAkun(e)), 0, sisa]], 4);
       });
       // aset tetap
       assets.forEach(a => tambah(a.date, a.id || 'ASET', `Pembelian aset tetap — ${a.name || ''}`, [['1-201', num(a.cost), 0], [kodeKas(asetAkun(a)), 0, num(a.cost)]], 3));
@@ -1476,7 +1487,7 @@
       const defaultPnwNotes = "1. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya jika masa berlaku telah habis.\n2. Sistem pembayaran dan termin waktu dapat didiskusikan lebih lanjut.";
       const emptyPenawaranForm = { date: '', validUntil: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Marketing Dept.', notes: defaultPnwNotes };
       const emptyInvoiceForm = { date: '', customer: '', usePpn: true, bayarKe: 'dki', items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
-      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', akunKas: 'bank', paidDate: '', talanganDari: '', nonDeductible: false };
+      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', akunKas: 'bank', akunKasLangsung: 'bank', bayarKas: '', paidDate: '', talanganDari: '', nonDeductible: false };
       const emptySjForm = { date: '', customer: '', driver: '', vehicle: '', items: [], signerName: '', signerRole: 'Warehouse Dept.' };
       const emptyKwitansiForm = { date: '', receivedFrom: '', amount: 0, purpose: '', signerName: '', signerRole: 'Finance Dept.' };
 
@@ -1942,12 +1953,16 @@
         if (!(num(expenseForm.amount) > 0)) { setFormError('Nominal harus lebih dari 0.'); return; }
         if (!(JENIS_BIAYA[expenseForm.category === 'HPP' ? 'HPP' : 'Operasional'] || []).includes(expenseForm.jenis)) { setFormError('Pilih jenis biaya.'); return; }
         if (num(expenseForm.ppnMasukan) < 0) { setFormError('PPN masukan tidak boleh negatif.'); return; }
-        const status = ['utang', 'talangan'].includes(expenseForm.paymentStatus) ? expenseForm.paymentStatus : 'lunas';
+        const status = ['utang', 'talangan', 'campuran'].includes(expenseForm.paymentStatus) ? expenseForm.paymentStatus : 'lunas';
         const belumDariKas = status !== 'lunas';
-        if (status === 'talangan' && !String(expenseForm.talanganDari || '').trim()) { setFormError('Isi nama pihak ketiga yang menalangi pembayaran.'); return; }
+        const adaTalangan = status === 'talangan' || status === 'campuran';
+        const totalBayar = rp(expenseForm.amount) + rp(expenseForm.ppnMasukan);
+        if (status === 'campuran' && !(rp(expenseForm.bayarKas) > 0 && rp(expenseForm.bayarKas) < totalBayar)) { setFormError(`Isi nominal dari kas: lebih dari 0 dan kurang dari total ${formatIDR(totalBayar)}. Jika seluruhnya dari kas, pilih "Lunas".`); return; }
+        if (adaTalangan && !String(expenseForm.talanganDari || '').trim()) { setFormError('Isi nama pihak ketiga yang menalangi pembayaran.'); return; }
         if (belumDariKas && expenseForm.paidDate && expenseForm.paidDate < expenseForm.date) { setFormError(status === 'talangan' ? 'Tanggal pengembalian tidak boleh sebelum tanggal beban.' : 'Tanggal pelunasan tidak boleh sebelum tanggal beban.'); return; }
         const completeItem = { ...expenseForm, amount: rp(expenseForm.amount), ppnMasukan: rp(expenseForm.ppnMasukan), paymentStatus: status, paidDate: belumDariKas ? (expenseForm.paidDate || '') : '',
-          talanganDari: status === 'talangan' ? String(expenseForm.talanganDari).trim().slice(0, 80) : '', akunKas: akunAman(expenseForm.akunKas), nonDeductible: !!expenseForm.nonDeductible };
+          talanganDari: adaTalangan ? String(expenseForm.talanganDari).trim().slice(0, 80) : '', akunKas: akunAman(expenseForm.akunKas),
+          bayarKas: status === 'campuran' ? rp(expenseForm.bayarKas) : 0, akunKasLangsung: status === 'campuran' ? akunAman(expenseForm.akunKasLangsung) : '', nonDeductible: !!expenseForm.nonDeductible };
         if (editingId) { setExpenses(sortByDateDesc((expenses||[]).map(e => e?.id === editingId ? { ...completeItem, id: e.id } : e))); }
         else {
           const newId = `EXP-${Date.now().toString(36).toUpperCase()}`;   // unik (dulu acak 4 digit, bisa bentrok)
@@ -2255,7 +2270,7 @@
                   <div className="grid grid-cols-2 gap-6">
                     <table className="w-full"><tbody>
                       {head('Aset lancar')}
-                      {row('Kas Tunai (BCA 0941426696)', A.kasTunai, { indent: true })}
+                      {row('Kas Tunai', A.kasTunai, { indent: true })}
                       {row('Kas Bank (Bank DKI 50308011105)', A.kasBank, { indent: true })}
                       {row('Piutang usaha', A.piutang, { indent: true })}
                       {row('Persediaan', A.persediaan, { indent: true })}
@@ -2313,7 +2328,7 @@
                     {row('Kenaikan (penurunan) kas & bank', AK.kenaikan, { total: true })}
                     {row('Kas & bank awal tahun', AK.kasAwal, { indent: true })}
                     {row('KAS & BANK AKHIR TAHUN', AK.kasAkhir, { grand: true })}
-                    {row('Kas Tunai (BCA)', AK.kasAkhirTunai, { sub: true, key: 'ak-tunai' })}
+                    {row('Kas Tunai', AK.kasAkhirTunai, { sub: true, key: 'ak-tunai' })}
                     {row('Kas Bank (Bank DKI)', AK.kasAkhirBank, { sub: true, key: 'ak-bank' })}
                   </tbody></table>
                   {AK.nonKasTalangan > 0 && <p className="mt-3 text-[10px] text-slate-700"><b>Transaksi non-kas:</b> pengeluaran {formatIDR(AK.nonKasTalangan)} dibayar langsung oleh pihak ketiga (dana talangan) dan tidak mengurangi kas & bank; kewajibannya disajikan sebagai utang dana talangan pada laporan posisi keuangan.</p>}
@@ -2616,7 +2631,7 @@
             {card(`Pendapatan Usaha ${lapYear}`, lr.pendapatanUsaha, `PPN ${formatIDR(lr.penjualanPPN)} · Non-PPN ${formatIDR(lr.penjualanNonPPN)}`, 'bg-blue-50 text-blue-600', IconWallet)}
             {card('Total Beban', bebanTotal, 'HPP + operasional + penyusutan', 'bg-rose-50 text-rose-600', IconTrendingDown)}
             {card('Laba Bersih', lr.labaBersih, 'Setelah estimasi PPh Badan', 'bg-emerald-50 text-emerald-600', IconCalculator)}
-            {card('Kas & Bank', R.aset.kas, `Tunai (BCA) ${formatIDR(R.aset.kasTunai)} · Bank (DKI) ${formatIDR(R.aset.kasBank)}`, 'bg-slate-100 text-slate-700', IconLandmark)}
+            {card('Kas & Bank', R.aset.kas, `Kas Tunai ${formatIDR(R.aset.kasTunai)} · Kas Bank ${formatIDR(R.aset.kasBank)}`, 'bg-slate-100 text-slate-700', IconLandmark)}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden">
@@ -3277,7 +3292,7 @@
                 <div className="grid lg:grid-cols-2 gap-8 mt-2">
                   <div className="overflow-x-auto"><table className="w-full text-sm min-w-[340px]"><tbody>
                     {lrHead('Aset lancar')}
-                    {lrRow('Kas Tunai (BCA 0941426696)', A.kasTunai, { indent: true })}
+                    {lrRow('Kas Tunai', A.kasTunai, { indent: true })}
                     {lrRow('Kas Bank (Bank DKI 50308011105)', A.kasBank, { indent: true })}
                     {lrRow('Piutang usaha', A.piutang, { indent: true })}
                     {lrRow('Persediaan', A.persediaan, { indent: true })}
@@ -3343,7 +3358,7 @@
                     {lrRow('Kenaikan (penurunan) kas & bank', AK.kenaikan, { total: true })}
                     {lrRow('Kas & bank awal tahun', AK.kasAwal, { indent: true })}
                     {lrRow('KAS & BANK AKHIR TAHUN', AK.kasAkhir, { grand: true })}
-                    {lrRow('Kas Tunai (BCA)', AK.kasAkhirTunai, { sub: true, key: 'ak-tunai' })}
+                    {lrRow('Kas Tunai', AK.kasAkhirTunai, { sub: true, key: 'ak-tunai' })}
                     {lrRow('Kas Bank (Bank DKI)', AK.kasAkhirBank, { sub: true, key: 'ak-bank' })}
                   </tbody></table>
                   </div>
@@ -3395,7 +3410,7 @@
                       <div className="overflow-x-auto">{tabelNeracaSaldo(bb, false)}</div>
                     </div>
                   )}
-                  <p className="text-xs text-slate-500 max-w-3xl">Jurnal dibuat otomatis: invoice → piutang & penjualan; pelunasan → Kas Tunai (BCA) atau Kas Bank (DKI) sesuai rekening di invoice; pengeluaran → beban per jenis biaya dengan lawan kas yang dipilih, utang usaha, atau utang dana talangan; akhir tahun → penyusutan, penyesuaian persediaan, dan taksiran PPh. Akun pendapatan & beban ditutup ke saldo laba setiap awal tahun berikutnya.</p>
+                  <p className="text-xs text-slate-500 max-w-3xl">Jurnal dibuat otomatis: invoice → piutang & penjualan; pelunasan → Kas Tunai atau Kas Bank sesuai rekening di invoice; pengeluaran → beban per jenis biaya dengan lawan kas yang dipilih, utang usaha, atau utang dana talangan; akhir tahun → penyusutan, penyesuaian persediaan, dan taksiran PPh. Akun pendapatan & beban ditutup ke saldo laba setiap awal tahun berikutnya.</p>
                 </div>
               );
             })()}
@@ -3478,7 +3493,7 @@
                     <h3 className="text-lg font-black text-slate-900">1. Saldo awal</h3>
                     <p className="text-sm text-slate-500 mt-1">Posisi keuangan <b>sebelum</b> transaksi pertama yang dicatat di portal ini. Isi sekali saja.</p>
                     <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                      {[['kasTunai', 'Kas Tunai (BCA 0941426696)'], ['kas', 'Kas Bank (Bank DKI 50308011105)'], ['piutang', 'Piutang usaha'], ['persediaan', 'Persediaan barang'], ['asetTetap', 'Aset tetap (harga perolehan)'], ['akumPenyusutan', 'Akumulasi penyusutan'], ['utangUsaha', 'Utang usaha'], ['utangPajak', 'Utang pajak (PPh)'], ['pinjaman', 'Utang pinjaman'], ['modal', 'Modal disetor']].map(([k, l]) => (
+                      {[['kasTunai', 'Kas Tunai'], ['kas', 'Kas Bank (Bank DKI 50308011105)'], ['piutang', 'Piutang usaha'], ['persediaan', 'Persediaan barang'], ['asetTetap', 'Aset tetap (harga perolehan)'], ['akumPenyusutan', 'Akumulasi penyusutan'], ['utangUsaha', 'Utang usaha'], ['utangPajak', 'Utang pajak (PPh)'], ['pinjaman', 'Utang pinjaman'], ['modal', 'Modal disetor']].map(([k, l]) => (
                         <label key={k} className="block"><span className="block text-xs font-bold text-slate-600 mb-1">{l}</span>
                           <input type="number" min="0" value={ledger.opening[k] || 0} onChange={(e) => setOpening(k, e.target.value)} className={inputCls} /></label>
                       ))}
@@ -3497,7 +3512,7 @@
                       <p className="text-sm text-slate-500 mt-1">Opsional, untuk pencocokan dengan rekening koran. Dana yang masih mengendap di rekening (belum dicairkan/dipakai) tetap termasuk. Hasilnya tampil di Neraca.</p>
                       <div className="grid sm:grid-cols-2 gap-3 mt-3">
                         {Object.entries(AKUN_KAS).map(([k, a]) => (
-                          <label key={k} className="block"><span className="block text-xs font-bold text-slate-600 mb-1">{a.label} — {a.detail.split(' a/n')[0]}</span>
+                          <label key={k} className="block"><span className="block text-xs font-bold text-slate-600 mb-1">{namaKas(k)}</span>
                             <input type="number" min="0" aria-label={'Saldo sebenarnya ' + a.label} placeholder="Opsional" value={((ledger.saldoBank || {})[lapYear] || {})[k] ?? ''} onChange={(e) => setSaldoBank(lapYear, k, e.target.value)} className={inputCls} /></label>
                         ))}
                       </div>
@@ -3547,7 +3562,7 @@
 
                 <div className={`${box} p-6`}>
                   <h3 className="text-lg font-black text-slate-900">5. Transaksi kas lain</h3>
-                  <p className="text-sm text-slate-500 mt-1">Uang masuk/keluar yang bukan invoice atau beban: setoran modal, prive, pinjaman, setoran pajak, bunga bank, pelunasan saldo awal, serta pindah dana antara Kas Tunai (BCA) dan Kas Bank (DKI).</p>
+                  <p className="text-sm text-slate-500 mt-1">Uang masuk/keluar yang bukan invoice atau beban: setoran modal, prive, pinjaman, setoran pajak, bunga bank, pelunasan saldo awal, serta pindah dana antara Kas Tunai dan Kas Bank.</p>
                   <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3 mt-4 items-end">
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Tanggal</span><input type="date" value={cashForm.date} onChange={(e) => setCashForm({ ...cashForm, date: e.target.value })} className={inputCls} /></label>
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Jenis</span><select value={cashForm.type} onChange={(e) => setCashForm({ ...cashForm, type: e.target.value })} className={inputCls}>{Object.entries(JENIS_KAS).map(([k, v]) => <option key={k} value={k}>{v.arah > 0 ? '＋ ' : v.arah < 0 ? '－ ' : '⇄ '}{v.label}</option>)}</select></label>
@@ -3741,9 +3756,9 @@
             <span className="ml-auto text-sm text-slate-500">{daftar.length} catatan · <b className="text-rose-600 tabular-nums">{formatIDR(totalDaftar)}</b></span>
           </div>
           {(() => {
-            const tl = (expenses || []).filter(e => e && e.paymentStatus === 'talangan');
+            const tl = (expenses || []).filter(e => e && ['talangan', 'campuran'].includes(e.paymentStatus) && expTalanganNominal(e) > 0);
             if (!tl.length) return null;
-            const gross = (e) => num(e.amount) + num(e.ppnMasukan);
+            const gross = (e) => expTalanganNominal(e);
             const per = {};
             tl.forEach(e => { const k = String(e.talanganDari || '').trim() || 'Pihak ketiga (tanpa nama)'; const t = per[k] = per[k] || { nama: k, sisa: 0, kembali: 0, items: [] }; if (e.paidDate) t.kembali += gross(e); else { t.sisa += gross(e); t.items.push(e); } });
             const daftarPihak = Object.values(per).sort((a, b) => b.sisa - a.sisa);
@@ -3758,7 +3773,7 @@
                   <div className="text-right"><div className="text-[11px] font-bold text-slate-500 uppercase">Belum dikembalikan</div><div className="text-xl font-black text-violet-700 tabular-nums">{formatIDR(totalSisa)}</div></div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-3 text-sm"><label className="font-semibold text-slate-600" htmlFor="tglKembali">Tanggal pengembalian:</label><input id="tglKembali" type="date" value={tglKembali} onChange={(e) => setTglKembali(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
-                  <label className="font-semibold text-slate-600 ml-2" htmlFor="kasKembali">dibayar dari:</label><select id="kasKembali" value={kasKembali} onChange={(e) => setKasKembali(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-semibold">{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{a.label} ({a.detail.split(' a/n')[0]})</option>)}</select></div>
+                  <label className="font-semibold text-slate-600 ml-2" htmlFor="kasKembali">dibayar dari:</label><select id="kasKembali" value={kasKembali} onChange={(e) => setKasKembali(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-semibold">{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{namaKas(k)}</option>)}</select></div>
                 <div className="mt-3 divide-y divide-slate-100">
                   {daftarPihak.map(t => (
                     <div key={t.nama} className="py-3">
@@ -3823,7 +3838,11 @@
                     <td className="px-6 py-4 text-right font-bold text-rose-600">{formatIDR(exp?.amount)}</td>
                     <td className="px-6 py-4 text-right text-sm text-slate-600">{num(exp?.ppnMasukan) ? formatIDR(exp.ppnMasukan) : '—'}</td>
                     <td className="px-6 py-4">
-                      {exp?.paymentStatus === 'talangan'
+                      {exp?.paymentStatus === 'campuran'
+                        ? <><span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.paidDate ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-sky-50 border-sky-200 text-sky-700'}`}>Kas + talangan</span>
+                            <span className="block mt-1 text-[11px] font-semibold text-slate-500 whitespace-nowrap">{AKUN_KAS[expAkunLangsung(exp)].label} {formatIDR(expKasLangsung(exp))}</span>
+                            <span className="block text-[11px] font-semibold text-violet-700 whitespace-nowrap">Talangan {formatIDR(expTalanganNominal(exp))} · {exp?.talanganDari}{exp?.paidDate ? ` · dikembalikan ${exp.paidDate}` : ''}</span></>
+                        : exp?.paymentStatus === 'talangan'
                         ? <><span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.paidDate ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-violet-50 border-violet-200 text-violet-700'}`}>{exp?.paidDate ? 'Talangan dikembalikan' : 'Dana talangan'}</span>
                             <span className="block mt-1 text-[11px] font-semibold text-slate-500">{exp?.talanganDari}{exp?.paidDate ? ` · ${exp.paidDate} · dari ${AKUN_KAS[expAkun(exp)].label}` : ''}</span></>
                         : exp?.paymentStatus === 'utang' && !exp?.paidDate
@@ -3862,17 +3881,30 @@
                   </div>
                   <p className="text-xs text-slate-500 -mt-2">Nominal = harga <b>sebelum PPN</b>. Isi PPN Masukan hanya jika ada faktur pajak dari pemasok (dapat dikreditkan).</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Pembayaran</label><select aria-label="Sumber pembayaran" value={expenseForm.paymentStatus === 'lunas' || !expenseForm.paymentStatus ? 'lunas:' + akunAman(expenseForm.akunKas) : expenseForm.paymentStatus} onChange={(e) => { const [st, ak] = e.target.value.split(':'); setExpenseForm({...expenseForm, paymentStatus: st, akunKas: ak || akunAman(expenseForm.akunKas)}); }} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer"><option value="lunas:tunai">Lunas — dari Kas Tunai (BCA)</option><option value="lunas:bank">Lunas — dari Kas Bank (Bank DKI)</option><option value="utang">Belum dibayar (utang ke pemasok)</option><option value="talangan">Dana talangan pihak ketiga (otomatis jadi utang)</option></select></div>
-                    {['utang', 'talangan'].includes(expenseForm.paymentStatus) && expenseForm.paidDate && <div className="col-span-2 -mt-1"><label className="block text-sm font-semibold text-slate-700 mb-1">{expenseForm.paymentStatus === 'talangan' ? 'Dikembalikan dari' : 'Dilunasi dari'}</label><select aria-label="Dibayar dari kas" value={akunAman(expenseForm.akunKas)} onChange={(e) => setExpenseForm({...expenseForm, akunKas: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer">{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{a.label} ({a.detail})</option>)}</select></div>}
+                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Pembayaran</label><select aria-label="Sumber pembayaran" value={expenseForm.paymentStatus === 'lunas' || !expenseForm.paymentStatus ? 'lunas:' + akunAman(expenseForm.akunKas) : expenseForm.paymentStatus} onChange={(e) => { const [st, ak] = e.target.value.split(':'); setExpenseForm({...expenseForm, paymentStatus: st, akunKas: ak || akunAman(expenseForm.akunKas)}); }} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer"><option value="lunas:tunai">Lunas — dari Kas Tunai</option><option value="lunas:bank">Lunas — dari Kas Bank</option><option value="campuran">Sebagian dari kas + sebagian dana talangan</option><option value="utang">Belum dibayar (utang ke pemasok)</option><option value="talangan">Seluruhnya dana talangan pihak ketiga (otomatis jadi utang)</option></select></div>
+                    {['utang', 'talangan', 'campuran'].includes(expenseForm.paymentStatus) && expenseForm.paidDate && <div className="col-span-2 -mt-1"><label className="block text-sm font-semibold text-slate-700 mb-1">{expenseForm.paymentStatus === 'utang' ? 'Dilunasi dari' : 'Dana talangan dikembalikan dari'}</label><select aria-label="Dibayar dari kas" value={akunAman(expenseForm.akunKas)} onChange={(e) => setExpenseForm({...expenseForm, akunKas: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer">{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{namaKas(k)}</option>)}</select></div>}
                     {expenseForm.paymentStatus === 'utang' && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Tanggal Pelunasan</label><input type="date" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
-                    {expenseForm.paymentStatus === 'talangan' && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Dikembalikan tgl</label><input type="date" aria-label="Tanggal dikembalikan" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
+                    {['talangan', 'campuran'].includes(expenseForm.paymentStatus) && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Talangan dikembalikan tgl</label><input type="date" aria-label="Tanggal dikembalikan" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
                   </div>
-                  {expenseForm.paymentStatus === 'talangan' && (
+                  {expenseForm.paymentStatus === 'campuran' && (() => {
+                    const total = rp(expenseForm.amount) + rp(expenseForm.ppnMasukan), dariKas = rp(expenseForm.bayarKas), dariTalangan = Math.max(0, total - dariKas);
+                    return (
+                      <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 space-y-2 -mt-1" data-testid="bayar-campuran">
+                        <p className="text-sm font-bold text-slate-800">Total dibayar {formatIDR(total)} <span className="font-medium text-slate-500">(nominal + PPN masukan)</span></p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block"><span className="block text-xs font-semibold text-slate-700 mb-1">Dari kas</span><select aria-label="Kas yang dipakai" value={akunAman(expenseForm.akunKasLangsung)} onChange={(e) => setExpenseForm({...expenseForm, akunKasLangsung: e.target.value})} className="w-full bg-white border rounded-xl px-3 py-2 text-sm outline-none cursor-pointer">{Object.keys(AKUN_KAS).map(k => <option key={k} value={k}>{namaKas(k)}</option>)}</select></label>
+                          <label className="block"><span className="block text-xs font-semibold text-slate-700 mb-1">Nominal dari kas (Rp)</span><input type="number" min="0" aria-label="Nominal dari kas" value={expenseForm.bayarKas} onChange={(e) => setExpenseForm({...expenseForm, bayarKas: e.target.value})} className="w-full bg-white border rounded-xl px-3 py-2 text-sm outline-none" /></label>
+                        </div>
+                        <div className="flex justify-between text-sm bg-white border border-violet-200 rounded-lg px-3 py-2"><span className="font-semibold text-violet-800">Sisa dari dana talangan (jadi utang)</span><b className="tabular-nums text-violet-800" data-testid="sisa-talangan">{formatIDR(dariTalangan)}</b></div>
+                      </div>
+                    );
+                  })()}
+                  {['talangan', 'campuran'].includes(expenseForm.paymentStatus) && (
                     <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2 -mt-1">
                       <label className="block"><span className="block text-sm font-semibold text-slate-700 mb-1">Nama pihak ketiga yang membayar</span>
                         <input type="text" list="daftarPihakTalangan" placeholder="mis. CV Mitra Jaya / Bapak Andi" value={expenseForm.talanganDari || ''} onChange={(e) => setExpenseForm({...expenseForm, talanganDari: e.target.value})} className="w-full bg-white border rounded-xl px-4 py-2 text-sm outline-none" /></label>
-                      <datalist id="daftarPihakTalangan">{[...new Set((expenses || []).filter(x => x && x.paymentStatus === 'talangan' && x.talanganDari).map(x => x.talanganDari))].map(n => <option key={n} value={n} />)}</datalist>
-                      <p className="text-xs text-violet-900">Beban tetap masuk laba rugi, tetapi <b>kas/bank PT tidak berkurang</b>. Nilainya dicatat sebagai <b>utang dana talangan</b> kepada pihak ini sampai dikembalikan. Kosongkan tanggal dikembalikan jika belum diganti.</p>
+                      <datalist id="daftarPihakTalangan">{[...new Set((expenses || []).filter(x => x && ['talangan', 'campuran'].includes(x.paymentStatus) && x.talanganDari).map(x => x.talanganDari))].map(n => <option key={n} value={n} />)}</datalist>
+                      <p className="text-xs text-violet-900">Beban tetap masuk laba rugi penuh. Bagian yang ditalangi <b>tidak mengurangi kas PT</b> dan dicatat sebagai <b>utang dana talangan</b> kepada pihak ini sampai dikembalikan. Kosongkan tanggal dikembalikan jika belum diganti.</p>
                     </div>
                   )}
                   <label className="flex items-start gap-3 bg-slate-50 border rounded-xl p-3 cursor-pointer">
