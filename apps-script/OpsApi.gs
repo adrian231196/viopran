@@ -57,6 +57,22 @@ function opsHandle_(body) {
     });
   }
 
+  // ---- hanya membaca: tanpa antre kunci, supaya cepat (cek data terbaru, ambil foto/PDF)
+  if (a === 'opsFile' || a === 'opsFiles' || (a === 'opsSync' && opsKosong_(body))) {
+    var D0 = opsLoad_(true);
+    var u0 = opsSessionUser_(D0, body.token);
+    if (!u0) return { ok: false, error: 'AUTH' };
+    if (a === 'opsSync') {
+      if (body.ver && body.ver === D0.ver) return { ok: true, same: true, ver: D0.ver };
+      return { ok: true, data: opsView_(D0, u0), ver: D0.ver, idMap: {}, conflicts: [] };
+    }
+    var terlihat = JSON.stringify(opsView_(D0, u0));
+    if (a === 'opsFile') return opsFile_(terlihat, body.fileId);
+    var files = {};
+    (body.fileIds || []).slice(0, 10).forEach(function (id) { files[id] = opsFile_(terlihat, id); });
+    return { ok: true, files: files };
+  }
+
   return nvpWithLock_(function () {
     var D = opsLoad_();
     var user = opsSessionUser_(D, body.token);
@@ -66,9 +82,8 @@ function opsHandle_(body) {
       opsSave_(D);
       opsKirimPush_(D, res.pushes);
       if (res.pushes.length) opsSave_(D); // langganan kedaluwarsa dibersihkan
-      return { ok: true, data: opsView_(D, user), idMap: res.idMap, conflicts: res.conflicts };
+      return { ok: true, data: opsView_(D, user), ver: D.ver, idMap: res.idMap, conflicts: res.conflicts };
     }
-    if (a === 'opsFile') return opsFile_(D, user, body.fileId);
     if (a === 'opsSubscribe') {
       var s = body.sub || {};
       if (!s.endpoint || !s.keys) return { ok: false, error: 'LANGGANAN_TIDAK_VALID' };
@@ -118,8 +133,34 @@ function opsFile_get_() {
   props.setProperty('NVP_OPS_FILE_ID', f2.getId());
   return f2;
 }
-function opsLoad_() {
-  var raw = opsFile_get_().getBlob().getDataAsString();
+// Salinan data di CacheService (memori Google) agar tidak selalu membaca file Drive — jauh lebih cepat
+var OPS_CACHE_POTONG = 40000;
+function opsCache_() { try { return typeof CacheService !== 'undefined' ? CacheService.getScriptCache() : null; } catch (e) { return null; } }
+function opsBacaCache_() {
+  var c = opsCache_(); if (!c) return null;
+  try {
+    var meta = c.get('opsD:meta'); if (!meta) return null;
+    var m = JSON.parse(meta), keys = [];
+    for (var i = 0; i < m.n; i++) keys.push('opsD:' + m.ver + ':' + i);
+    var got = c.getAll(keys), parts = [];
+    for (var j = 0; j < keys.length; j++) { if (got[keys[j]] == null) return null; parts.push(got[keys[j]]); }
+    return parts.join('');
+  } catch (e) { return null; }
+}
+function opsTulisCache_(raw, ver) {
+  var c = opsCache_(); if (!c) return;
+  try {
+    var obj = {}, n = Math.ceil(raw.length / OPS_CACHE_POTONG);
+    if (n > 200) return;
+    for (var i = 0; i < n; i++) obj['opsD:' + ver + ':' + i] = raw.slice(i * OPS_CACHE_POTONG, (i + 1) * OPS_CACHE_POTONG);
+    c.putAll(obj, 21600);
+    c.put('opsD:meta', JSON.stringify({ ver: ver, n: n }), 21600);
+  } catch (e) { try { c.remove('opsD:meta'); } catch (e2) {} }
+}
+/** tanpaKunci=true: pembaca tanpa kunci tidak boleh menulis salinan cache (bisa menimpa data yang lebih baru). */
+function opsLoad_(tanpaKunci) {
+  var raw = opsBacaCache_();
+  if (raw == null) { raw = opsFile_get_().getBlob().getDataAsString(); if (!tanpaKunci) { var D1 = null; try { D1 = JSON.parse(raw); } catch (e) {} if (D1 && D1.ver) opsTulisCache_(raw, D1.ver); } }
   var D = {};
   try { D = raw ? JSON.parse(raw) : {}; } catch (e) { throw new Error('Data aplikasi tidak dapat dibaca.'); }
   OPS_COLS.concat(['notifs', 'subs']).forEach(function (k) { if (!Array.isArray(D[k])) D[k] = []; });
@@ -128,7 +169,11 @@ function opsLoad_() {
 }
 function opsSave_(D) {
   D.notifs = D.notifs.slice(0, 1500);
-  opsFile_get_().setContent(JSON.stringify(D));
+  D.ver = Date.now().toString(36) + opsRandomHex_(3);
+  var c = opsCache_(); if (c) { try { c.remove('opsD:meta'); } catch (e) {} }
+  var raw = JSON.stringify(D);
+  opsFile_get_().setContent(raw);
+  opsTulisCache_(raw, D.ver);
 }
 
 // ---------------------------------------------------------------------
@@ -390,10 +435,16 @@ function opsSimpanFoto_(list, klien, max) {
   return out;
 }
 /** Mengirim isi berkas (foto/PDF) ke aplikasi — hanya berkas yang memang terlihat oleh akun ini. */
-function opsFile_(D, user, fileId) {
-  if (!fileId || JSON.stringify(opsView_(D, user)).indexOf('"' + fileId + '"') < 0) return { ok: false, error: 'TIDAK_DIIZINKAN' };
-  var blob = DriveApp.getFileById(fileId).getBlob();
-  return { ok: true, mime: blob.getContentType(), b64: Utilities.base64Encode(blob.getBytes()), name: blob.getName() };
+function opsFile_(terlihat, fileId) {
+  if (!fileId || terlihat.indexOf('"' + fileId + '"') < 0) return { ok: false, error: 'TIDAK_DIIZINKAN' };
+  try {
+    var blob = DriveApp.getFileById(fileId).getBlob();
+    return { ok: true, mime: blob.getContentType(), b64: Utilities.base64Encode(blob.getBytes()), name: blob.getName() };
+  } catch (e) { return { ok: false, error: 'TIDAK_ADA' }; }
+}
+function opsKosong_(b) {
+  var ch = b.changes || {};
+  return !Object.keys(ch).some(function (k) { return (ch[k] || []).length; }) && !(b.notifs || []).length && !(b.dibaca || []).length;
 }
 function opsDataUri_(fileId) {
   try { var b = DriveApp.getFileById(fileId).getBlob(); return 'data:' + b.getContentType() + ';base64,' + Utilities.base64Encode(b.getBytes()); } catch (e) { return ''; }

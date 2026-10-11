@@ -1,27 +1,39 @@
 /* NVP Operasional — service worker: bisa dibuka offline + notifikasi HP (tampil walau layar terkunci) */
-const CACHE = 'nvp-ops-v7';
+// Versi diisi otomatis saat build (berubah setiap ada pembaruan) → HP memasang versi baru sendiri
+const VERSI = '20261010-610b8495';
+const CACHE = 'nvp-ops-' + VERSI;
 const FILES = ['./', 'index.html', 'app.js', 'styles.css', 'manifest.webmanifest', '../config.js', 'vendor/react.production.min.js', 'vendor/react-dom.production.min.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png', 'icons/apple-touch-icon.png'];
 const SIMPAN = ['nvp-ops-meta', 'nvp-ops-berkas']; // jangan dihapus saat pembaruan
 
-self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
+self.addEventListener('install', (e) => {
+  // unduh semua berkas versi baru (melewati cache browser), lalu langsung aktif
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
+});
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && SIMPAN.indexOf(k) < 0).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  // Jaringan dulu agar versi baru cepat terlihat; jika sinyal lemah (>3,5 detik) atau offline, pakai salinan di HP
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin) return;
+  if (url.pathname === new URL('../config.js', self.registration.scope).pathname) {
+    // pengaturan website: jaringan dulu (maks. 2,5 detik), cadangan dari HP
+    e.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const net = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; });
+      try { const res = await Promise.race([net, new Promise(r => setTimeout(r, 2500, null))]); if (res) return res; } catch (err) {}
+      const hit = await cache.match(req, { ignoreSearch: true });
+      return hit || net;
+    })());
+    return;
+  }
+  // berkas aplikasi: langsung dari HP (cepat & bisa offline); versi baru datang lewat pembaruan service worker
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const dariJaringan = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; });
-    const tunggu = new Promise(r => setTimeout(r, 3500, null));
-    try {
-      const res = await Promise.race([dariJaringan, tunggu]);
-      if (res) return res;
-    } catch (err) {}
-    const simpanan = await cache.match(req, { ignoreSearch: true }) || (req.mode === 'navigate' ? await cache.match('index.html') : null);
-    if (simpanan) { e.waitUntil(dariJaringan.catch(() => {})); return simpanan; }
-    return dariJaringan.catch(() => cache.match('index.html'));
+    const hit = await cache.match(req, { ignoreSearch: true }) || (req.mode === 'navigate' ? await cache.match('index.html') : null);
+    if (hit) return hit;
+    try { const res = await fetch(req); if (res.ok && url.pathname.startsWith(new URL('./', self.registration.scope).pathname)) cache.put(req, res.clone()); return res; }
+    catch (err) { return (await cache.match('index.html')) || Response.error(); }
   })());
 });
 
