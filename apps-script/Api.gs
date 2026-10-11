@@ -38,17 +38,18 @@ var NVP_ROLES_APLIKASI = ['teknisi', 'manager', 'direktur'];
 var NVP_BACKUP_FOLDER = 'NVP Backup';
 
 // ---- Daftar menu & data yang dipakai tiap menu (harus sama dengan index.html)
-var NVP_MENUS = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran', 'labarugi', 'neraca', 'pajak', 'bukubesar', 'datakeu'];
+var NVP_MENUS = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran', 'stok', 'labarugi', 'neraca', 'pajak', 'bukubesar', 'datakeu'];
 var NVP_STAFF_DEFAULT = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran'];
-var NVP_DATA_KEYS = ['penawaran', 'invoices', 'expenses', 'suratJalan', 'kwitansi', 'assets', 'cashTx', 'ledger'];
-var NVP_LAPORAN_READ = ['invoices', 'expenses', 'assets', 'cashTx', 'ledger'];
+var NVP_DATA_KEYS = ['penawaran', 'invoices', 'expenses', 'suratJalan', 'kwitansi', 'assets', 'cashTx', 'ledger', 'stok'];
+var NVP_LAPORAN_READ = ['invoices', 'expenses', 'assets', 'cashTx', 'ledger', 'stok'];
 var NVP_MENU_DATA = {
   kalender:    { read: ['invoices'],                           write: [] },
   penawaran:   { read: ['penawaran'],                          write: ['penawaran'] },
-  invoice:     { read: ['invoices', 'suratJalan', 'kwitansi'], write: ['invoices', 'suratJalan', 'kwitansi'] }, // SJ & kwitansi otomatis
+  invoice:     { read: ['invoices', 'suratJalan', 'kwitansi', 'stok'], write: ['invoices', 'suratJalan', 'kwitansi'] }, // SJ & kwitansi otomatis
   suratjalan:  { read: ['suratJalan'],                         write: ['suratJalan'] },
   kwitansi:    { read: ['kwitansi'],                           write: ['kwitansi'] },
-  pengeluaran: { read: ['expenses'],                           write: ['expenses'] },
+  pengeluaran: { read: ['expenses', 'stok'],                   write: ['expenses'] },
+  stok:        { read: ['stok', 'invoices', 'expenses', 'assets', 'cashTx', 'ledger'], write: ['stok'] },
   labarugi:    { read: NVP_LAPORAN_READ,                       write: [] },
   neraca:      { read: NVP_LAPORAN_READ,                       write: [] },
   pajak:       { read: NVP_LAPORAN_READ,                       write: [] },
