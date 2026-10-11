@@ -358,7 +358,12 @@ function opsSync_(D, user, body) {
       var b = a.bayar || {};
       var bukti = opsSimpanFoto_(b.bukti, 'Bukti Pembayaran', 2);
       if (!bukti.length) { conflicts.push({ col: 'aju', id: srv.id, pesan: 'Bukti pembayaran wajib.' }); return; }
-      srv.bayar = { tgl: /^\d{4}-\d{2}-\d{2}$/.test(b.tgl) ? b.tgl : now.slice(0, 10), metode: b.metode === 'Tunai' ? 'Tunai' : 'Transfer bank', akun: b.akun === 'tunai' ? 'tunai' : 'bank', ref: str(b.ref, 60), bukti: bukti, oleh: me };
+      var sumber = b.sumber === 'campuran' || b.sumber === 'talangan' ? b.sumber : 'kas';
+      var bayarKas = sumber === 'kas' ? srv.total : sumber === 'talangan' ? 0 : Math.round(Number(b.bayarKas) || 0);
+      if (sumber === 'campuran' && !(bayarKas > 0 && bayarKas < srv.total)) { conflicts.push({ col: 'aju', id: srv.id, pesan: 'Nominal dari kas harus lebih dari 0 dan kurang dari total.' }); return; }
+      if (sumber !== 'kas' && !str(b.talanganDari, 80).trim()) { conflicts.push({ col: 'aju', id: srv.id, pesan: 'Nama pihak ketiga dana talangan wajib diisi.' }); return; }
+      srv.bayar = { tgl: /^\d{4}-\d{2}-\d{2}$/.test(b.tgl) ? b.tgl : now.slice(0, 10), metode: b.metode === 'Tunai' ? 'Tunai' : 'Transfer bank', akun: b.akun === 'tunai' ? 'tunai' : 'bank',
+        sumber: sumber, bayarKas: bayarKas, talanganDari: sumber === 'kas' ? '' : str(b.talanganDari, 80).trim(), ref: str(b.ref, 60), bukti: bukti, oleh: me };
       events.push({ jenis: 'bayar', id: srv.id });
     }
     srv.status = a.status;
@@ -525,7 +530,10 @@ function opsCatatPembayaran_(D, a, user) {
   var kkId = 'KK-' + ('000' + D.seq.KK).slice(-4);
   var penerima = a.jenis === 'gaji' ? opsNamaUser_(a.pemohonId) : a.atasNama;
   var bukti = (a.bayar.bukti || [])[0];
-  var kk = { id: kkId, tgl: a.bayar.tgl, deskripsi: a.keperluan + ' — ' + penerima, kategori: a.kategori, jenisBiaya: a.jenisBiaya, nominal: a.total, ref: a.bayar.ref,
+  var sumber = a.bayar.sumber || 'kas';
+  var dariKas = sumber === 'kas' ? a.total : sumber === 'talangan' ? 0 : Math.round(Number(a.bayar.bayarKas) || 0);
+  var kk = { id: kkId, tgl: a.bayar.tgl, deskripsi: a.keperluan + ' — ' + penerima, kategori: a.kategori, jenisBiaya: a.jenisBiaya, nominal: dariKas, ref: a.bayar.ref,
+    talangan: a.total - dariKas, talanganDari: a.bayar.talanganDari || '', sumber: sumber,
     pengajuanId: a.id, buktiFileId: bukti ? bukti.fileId : '', akun: a.bayar.akun === 'tunai' ? 'tunai' : 'bank', sinkron: false };
   D.kasKeluar.unshift(kk);
   a.kasKeluarId = kkId;
@@ -536,7 +544,9 @@ function opsCatatPembayaran_(D, a, user) {
   var expId = 'EXP-OPS-' + kkId.slice(3);
   if (!data.expenses.some(function (e) { return e && e.opsRef === a.id; })) {
     data.expenses.unshift({ id: expId, date: kk.tgl, desc: kk.deskripsi + ' (' + a.id + ')', category: a.kategori === 'HPP' ? 'HPP' : 'Operasional', jenis: a.jenisBiaya,
-      amount: a.total, ppnMasukan: 0, paymentStatus: 'lunas', akunKas: kk.akun, paidDate: '', nonDeductible: false,
+      amount: a.total, ppnMasukan: 0, nonDeductible: false, paidDate: '',
+      paymentStatus: sumber === 'kas' ? 'lunas' : sumber, akunKas: sumber === 'kas' ? kk.akun : 'bank',
+      bayarKas: sumber === 'campuran' ? dariKas : 0, akunKasLangsung: sumber === 'campuran' ? kk.akun : '', talanganDari: kk.talanganDari,
       sumber: 'NVP Operasional', opsRef: a.id, opsKasKeluar: kkId, buktiUrl: bukti ? 'https://drive.google.com/file/d/' + bukti.fileId + '/view' : '' });
     saveDataToDrive_(JSON.stringify(data));
   }
@@ -550,7 +560,17 @@ function opsJagaPengeluaran_(incoming, currentRaw) {
   var dariOps = (cur.expenses || []).filter(function (e) { return e && e.sumber === 'NVP Operasional'; });
   if (!dariOps.length || !incoming || !Array.isArray(incoming.expenses)) return incoming;
   var out = {}; Object.keys(incoming).forEach(function (k) { out[k] = incoming[k]; });
-  out.expenses = incoming.expenses.filter(function (e) { return !(e && e.sumber === 'NVP Operasional'); }).concat(dariOps);
+  // Satu-satunya yang boleh diubah dari portal: pengembalian dana talangan (tanggal & kas yang dipakai)
+  var masuk = {}; incoming.expenses.forEach(function (e) { if (e && e.sumber === 'NVP Operasional' && e.id) masuk[e.id] = e; });
+  var dijaga = dariOps.map(function (e) {
+    var inc = masuk[e.id];
+    if (!inc || (e.paymentStatus !== 'talangan' && e.paymentStatus !== 'campuran')) return e;
+    var c = {}; Object.keys(e).forEach(function (k) { c[k] = e[k]; });
+    c.paidDate = /^\d{4}-\d{2}-\d{2}$/.test(inc.paidDate || '') ? inc.paidDate : '';
+    c.akunKas = inc.akunKas === 'tunai' ? 'tunai' : 'bank';
+    return c;
+  });
+  out.expenses = incoming.expenses.filter(function (e) { return !(e && e.sumber === 'NVP Operasional'); }).concat(dijaga);
   return out;
 }
 
