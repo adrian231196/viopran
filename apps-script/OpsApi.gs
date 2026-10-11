@@ -358,7 +358,7 @@ function opsSync_(D, user, body) {
       var b = a.bayar || {};
       var bukti = opsSimpanFoto_(b.bukti, 'Bukti Pembayaran', 2);
       if (!bukti.length) { conflicts.push({ col: 'aju', id: srv.id, pesan: 'Bukti pembayaran wajib.' }); return; }
-      srv.bayar = { tgl: /^\d{4}-\d{2}-\d{2}$/.test(b.tgl) ? b.tgl : now.slice(0, 10), metode: b.metode === 'Tunai' ? 'Tunai' : 'Transfer bank', ref: str(b.ref, 60), bukti: bukti, oleh: me };
+      srv.bayar = { tgl: /^\d{4}-\d{2}-\d{2}$/.test(b.tgl) ? b.tgl : now.slice(0, 10), metode: b.metode === 'Tunai' ? 'Tunai' : 'Transfer bank', akun: b.akun === 'tunai' ? 'tunai' : 'bank', ref: str(b.ref, 60), bukti: bukti, oleh: me };
       events.push({ jenis: 'bayar', id: srv.id });
     }
     srv.status = a.status;
@@ -526,7 +526,7 @@ function opsCatatPembayaran_(D, a, user) {
   var penerima = a.jenis === 'gaji' ? opsNamaUser_(a.pemohonId) : a.atasNama;
   var bukti = (a.bayar.bukti || [])[0];
   var kk = { id: kkId, tgl: a.bayar.tgl, deskripsi: a.keperluan + ' — ' + penerima, kategori: a.kategori, jenisBiaya: a.jenisBiaya, nominal: a.total, ref: a.bayar.ref,
-    pengajuanId: a.id, buktiFileId: bukti ? bukti.fileId : '', sinkron: false };
+    pengajuanId: a.id, buktiFileId: bukti ? bukti.fileId : '', akun: a.bayar.akun === 'tunai' ? 'tunai' : 'bank', sinkron: false };
   D.kasKeluar.unshift(kk);
   a.kasKeluarId = kkId;
   // catat ke portal (file data keuangan yang sama dengan website)
@@ -536,7 +536,7 @@ function opsCatatPembayaran_(D, a, user) {
   var expId = 'EXP-OPS-' + kkId.slice(3);
   if (!data.expenses.some(function (e) { return e && e.opsRef === a.id; })) {
     data.expenses.unshift({ id: expId, date: kk.tgl, desc: kk.deskripsi + ' (' + a.id + ')', category: a.kategori === 'HPP' ? 'HPP' : 'Operasional', jenis: a.jenisBiaya,
-      amount: a.total, ppnMasukan: 0, paymentStatus: 'lunas', paidDate: '', nonDeductible: false,
+      amount: a.total, ppnMasukan: 0, paymentStatus: 'lunas', akunKas: kk.akun, paidDate: '', nonDeductible: false,
       sumber: 'NVP Operasional', opsRef: a.id, opsKasKeluar: kkId, buktiUrl: bukti ? 'https://drive.google.com/file/d/' + bukti.fileId + '/view' : '' });
     saveDataToDrive_(JSON.stringify(data));
   }

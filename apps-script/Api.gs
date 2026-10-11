@@ -38,7 +38,7 @@ var NVP_ROLES_APLIKASI = ['teknisi', 'manager', 'direktur'];
 var NVP_BACKUP_FOLDER = 'NVP Backup';
 
 // ---- Daftar menu & data yang dipakai tiap menu (harus sama dengan index.html)
-var NVP_MENUS = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran', 'labarugi', 'neraca', 'pajak', 'datakeu'];
+var NVP_MENUS = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran', 'labarugi', 'neraca', 'pajak', 'bukubesar', 'datakeu'];
 var NVP_STAFF_DEFAULT = ['kalender', 'penawaran', 'invoice', 'suratjalan', 'kwitansi', 'pengeluaran'];
 var NVP_DATA_KEYS = ['penawaran', 'invoices', 'expenses', 'suratJalan', 'kwitansi', 'assets', 'cashTx', 'ledger'];
 var NVP_LAPORAN_READ = ['invoices', 'expenses', 'assets', 'cashTx', 'ledger'];
@@ -52,6 +52,7 @@ var NVP_MENU_DATA = {
   labarugi:    { read: NVP_LAPORAN_READ,                       write: [] },
   neraca:      { read: NVP_LAPORAN_READ,                       write: [] },
   pajak:       { read: NVP_LAPORAN_READ,                       write: [] },
+  bukubesar:   { read: NVP_LAPORAN_READ,                       write: [] },
   datakeu:     { read: NVP_LAPORAN_READ,                       write: ['ledger', 'assets', 'cashTx', 'invoices'] }
 };
 

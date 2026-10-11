@@ -174,6 +174,7 @@
     // --- ICONS TAMBAHAN (WEBSITE) ---
     const IconShield = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>;
     const IconRefresh = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>;
+    const IconBook = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg>;
     const IconClipboard = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><polyline points="9 14 11 16 15 12"/></svg>;
     const IconAward = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>;
     const IconPhone = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
@@ -268,6 +269,7 @@
       ['labarugi', 'Laba Rugi', 'Lihat laporan'],
       ['neraca', 'Neraca', 'Lihat laporan'],
       ['pajak', 'Pajak', 'Lihat PPN & PPh'],
+      ['bukubesar', 'Buku Besar', 'Jurnal umum, buku besar & neraca saldo'],
       ['datakeu', 'Data Keuangan', 'Ubah saldo awal, aset tetap, transaksi kas'],
     ];
     const MENU_KEYS = MENU_DEF.map(m => m[0]);
@@ -350,7 +352,26 @@
       bunga_bank:          { label: 'Bunga / jasa giro bank (sudah PPh final)', arah: 1 },
       terima_piutang_awal: { label: 'Pelunasan piutang saldo awal',       arah: 1 },
       bayar_utang_awal:    { label: 'Pembayaran utang saldo awal',        arah: -1 },
+      pindah_kas:          { label: 'Pindah dana antar kas (Tunai ↔ Bank)', arah: 0 },
     };
+
+    // Akun kas perusahaan & rekening tujuan pembayaran invoice
+    const AKUN_KAS = {
+      tunai: { kode: '1-101', label: 'Kas Tunai', detail: 'BCA 0941426696 a/n Adrian Anugerah Putra' },
+      bank:  { kode: '1-102', label: 'Kas Bank',  detail: 'Bank DKI 50308011105 a/n PT Nuri Vira Pratama' },
+    };
+    const REKENING = {
+      bca: { bank: 'BCA', norek: '0941426696', an: 'Adrian Anugerah Putra', akun: 'tunai' },
+      dki: { bank: 'DKI', norek: '50308011105', an: 'PT Nuri Vira Pratama', akun: 'bank' },
+    };
+    const akunAman = (a) => (a === 'tunai' ? 'tunai' : 'bank');
+    // Invoice lama tanpa pilihan rekening: mengikuti aturan lama (PPN → Bank DKI, non-PPN → BCA)
+    const invRek = (inv) => (inv && REKENING[inv.bayarKe]) ? inv.bayarKe : (inv && inv.usePpn ? 'dki' : 'bca');
+    const invAkun = (inv) => REKENING[invRek(inv)].akun;
+    const expAkun = (e) => akunAman(e && e.akunKas);
+    const asetAkun = (a) => akunAman(a && a.akunKas);
+    const txAkun = (t) => akunAman(t && t.akun);
+    const txTujuan = (t) => (txAkun(t) === 'tunai' ? 'bank' : 'tunai');
 
     // Jenis biaya per kategori — memudahkan penelitian beban (rincian di laba rugi & rekap pengeluaran)
     const JENIS_BIAYA = {
@@ -365,9 +386,9 @@
     }
 
     const LEDGER_DEFAULT = {
-      opening: { kas: 0, piutang: 0, persediaan: 0, asetTetap: 0, akumPenyusutan: 0, utangUsaha: 0, utangPajak: 0, pinjaman: 0, modal: 0 },
+      opening: { kasTunai: 0, kas: 0, piutang: 0, persediaan: 0, asetTetap: 0, akumPenyusutan: 0, utangUsaha: 0, utangPajak: 0, pinjaman: 0, modal: 0 },
       closingInventory: {},   // { '2026': nilai persediaan akhir hasil stock opname }
-      saldoBank: {},          // { '2026': saldo kas & bank sebenarnya per 31 Des (rekening koran + uang tunai) — untuk pencocokan }
+      saldoBank: {},          // { '2026': { tunai, bank } } saldo rekening sebenarnya per 31 Des — untuk pencocokan
       pphScheme: 'umum',      // 'umum' (Ps.17 + 31E) | 'final05' (PP 55 — masa transisi)
     };
 
@@ -393,10 +414,12 @@
         });
       }
       const saldoBank = {};
+      const angka = (v) => v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v));
       if (src.saldoBank && typeof src.saldoBank === 'object') {
         Object.keys(src.saldoBank).forEach(y => {
           const v = src.saldoBank[y];
-          if (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) saldoBank[y] = Number(v);
+          if (angka(v)) saldoBank[y] = { bank: Number(v) };   // format lama: satu angka
+          else if (v && typeof v === 'object') { const o = {}; ['tunai', 'bank'].forEach(k => { if (angka(v[k])) o[k] = Number(v[k]); }); if (Object.keys(o).length) saldoBank[y] = o; }
         });
       }
       return { opening, closingInventory, saldoBank, pphScheme: src.pphScheme === 'final05' ? 'final05' : 'umum' };
@@ -495,15 +518,21 @@
       const kasMasukTx = cashTx.filter(t => upTo(t.date) && JENIS_KAS[t.type].arah > 0).reduce((s, t) => s + num(t.amount), 0);
       const kasKeluarTx = cashTx.filter(t => upTo(t.date) && JENIS_KAS[t.type].arah < 0).reduce((s, t) => s + num(t.amount), 0);
 
-      // Kas & bank s.d. tanggal tertentu (beban talangan baru mengurangi kas saat dikembalikan ke pihak ketiga)
-      const kasSampai = (batas) => {
+      // Saldo per akun kas s.d. tanggal tertentu (beban talangan/utang baru mengurangi kas saat dibayar/dikembalikan)
+      const kasAkunSampai = (batas, akun) => {
         const sd = (d) => d && d <= batas;
-        return O.kas + invoices.filter(i => sd(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0)
-          - expenses.filter(e => sd(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0)
-          - assets.filter(a => sd(a.date)).reduce((s, a) => s + num(a.cost), 0)
-          + cashTx.filter(t => sd(t.date)).reduce((s, t) => s + JENIS_KAS[t.type].arah * num(t.amount), 0);
+        return (akun === 'tunai' ? O.kasTunai : O.kas)
+          + invoices.filter(i => invAkun(i) === akun && sd(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0)
+          - expenses.filter(e => expAkun(e) === akun && sd(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0)
+          - assets.filter(a => asetAkun(a) === akun && sd(a.date)).reduce((s, a) => s + num(a.cost), 0)
+          + cashTx.filter(t => sd(t.date)).reduce((s, t) => {
+            if (t.type === 'pindah_kas') return s + (txTujuan(t) === akun ? num(t.amount) : txAkun(t) === akun ? -num(t.amount) : 0);
+            return s + (txAkun(t) === akun ? JENIS_KAS[t.type].arah * num(t.amount) : 0);
+          }, 0);
       };
-      const kas = kasSampai(D);
+      const kasSampai = (batas) => kasAkunSampai(batas, 'tunai') + kasAkunSampai(batas, 'bank');
+      const kasTunai = kasAkunSampai(D, 'tunai'), kasBank = kasAkunSampai(D, 'bank');
+      const kas = kasTunai + kasBank;
       const piutang = O.piutang - sumTx('terima_piutang_awal', upTo)
         + invTerbit.filter(i => !upTo(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0);
       const persediaan = persAkhir(Y);
@@ -534,7 +563,7 @@
       const pinjaman = O.pinjaman + sumTx('pinjaman_masuk', upTo) - sumTx('bayar_pinjaman', upTo);
       const modal = O.modal + sumTx('modal', upTo);
 
-      const openingAset = O.kas + O.piutang + O.persediaan + O.asetTetap - O.akumPenyusutan;
+      const openingAset = O.kasTunai + O.kas + O.piutang + O.persediaan + O.asetTetap - O.akumPenyusutan;
       const openingKewajiban = O.utangUsaha + O.utangPajak + O.pinjaman;
       const saldoLabaAwal = openingAset - openingKewajiban - O.modal;   // saldo penyeimbang
       const priveSebelum = sumTx('prive', d => d && d < `${Y}-01-01`);
@@ -543,7 +572,7 @@
       const saldoLabaAkhir = saldoLabaAwalTahun + lr.labaBersih - priveTahunIni;
 
       const aset = {
-        kas, piutang, persediaan,
+        kas, kasTunai, kasBank, piutang, persediaan,
         ppnLebihBayar: ppnNet < 0 ? -ppnNet : 0,
         pphLebihBayar: pphNet < 0 ? -pphNet : 0,
         hargaPerolehan, akumulasi, asetTetapNeto: hargaPerolehan - akumulasi,
@@ -575,13 +604,15 @@
       };
       pendanaan.net = pendanaan.modal - pendanaan.prive + pendanaan.pinjamanMasuk - pendanaan.bayarPinjaman - pendanaan.kembaliTalangan;
       const kasAwal = kasSampai(`${Y - 1}-12-31`);
+      const kasAwalTunai = kasAkunSampai(`${Y - 1}-12-31`, 'tunai'), kasAwalBank = kasAkunSampai(`${Y - 1}-12-31`, 'bank');
+      const pindahKas = cashTx.filter(t => t.type === 'pindah_kas' && inY(t.date)).reduce((s, t) => s + num(t.amount), 0);
       const nonKasTalangan = expenses.filter(e => expIsTalangan(e) && inY(e.date)).reduce((s, e) => s + expGross(e), 0);
-      const arusKas = { operasi, investasi, pendanaan, kenaikan: operasi.net + investasi.net + pendanaan.net, kasAwal, kasAkhir: kas, nonKasTalangan };
+      const arusKas = { operasi, investasi, pendanaan, kenaikan: operasi.net + investasi.net + pendanaan.net, kasAwal, kasAkhir: kas, nonKasTalangan, kasAwalTunai, kasAwalBank, kasAkhirTunai: kasTunai, kasAkhirBank: kasBank, pindahKas };
       arusKas.cocok = Math.abs(arusKas.kasAwal + arusKas.kenaikan - arusKas.kasAkhir) < 1;
 
       // ---------- Pencocokan dengan saldo bank sebenarnya ----------
-      const saldoBankAsli = L.saldoBank[String(Y)];
-      const cocokBank = saldoBankAsli === undefined ? null : { saldo: num(saldoBankAsli), selisih: num(saldoBankAsli) - kas };
+      const saldoAsli = L.saldoBank[String(Y)] || {};
+      const cocokBank = ['tunai', 'bank'].filter(k => saldoAsli[k] !== undefined).map(k => ({ akun: k, label: AKUN_KAS[k].label, catatan: k === 'tunai' ? kasTunai : kasBank, saldo: num(saldoAsli[k]), selisih: num(saldoAsli[k]) - (k === 'tunai' ? kasTunai : kasBank) }));
 
       // ---------- PPN per masa (bulan) tahun Y ----------
       const ppnMasa = Array.from({ length: 12 }, (_, m) => {
@@ -598,10 +629,139 @@
       if (belumLunasLama) peringatan.push(`${belumLunasLama} invoice tahun lalu belum ditandai lunas — dianggap masih piutang.`);
       if (!lr.persAkhirDiisi && (lr.pembelian > 0 || lr.persAwal > 0)) peringatan.push(`Persediaan akhir ${Y} belum diisi — seluruh pembelian dianggap terjual (HPP).`);
       if (Math.abs(selisih) >= 1) peringatan.push(`Neraca selisih ${Math.round(selisih)} — periksa saldo awal.`);
-      if (kas < 0) peringatan.push(`Kas & bank per 31 Des ${Y} minus (${Math.round(kas).toLocaleString('id-ID')}). Pengeluaran yang sebenarnya dibayar pihak ketiga harus dicatat "Dibayar pihak ketiga (dana talangan)", dan saldo bank awal diisi di Data Keuangan.`);
-      if (cocokBank && Math.abs(cocokBank.selisih) >= 1) peringatan.push(`Kas & bank menurut catatan berbeda ${Math.round(cocokBank.selisih).toLocaleString('id-ID')} dari saldo sebenarnya — cek transaksi yang belum dicatat atau salah sumber dana.`);
+      [['tunai', kasTunai], ['bank', kasBank]].forEach(([k, v]) => { if (v < 0) peringatan.push(`${AKUN_KAS[k].label} per 31 Des ${Y} minus (${Math.round(v).toLocaleString('id-ID')}). Periksa pilihan kas pada invoice/pengeluaran, catat pengeluaran yang dibayar pihak ketiga sebagai "Dana talangan", atau isi saldo awal di Data Keuangan.`); });
+      cocokBank.forEach(c => { if (Math.abs(c.selisih) >= 1) peringatan.push(`${c.label} menurut catatan berbeda ${Math.round(c.selisih).toLocaleString('id-ID')} dari saldo sebenarnya — cek transaksi yang belum dicatat atau salah pilihan kas.`); });
 
       return { year: Y, firstYear, lr, aset, liabilitas, ekuitas, selisih, ppnMasa, scheme: L.pphScheme, peringatan, arusKas, cocokBank };
+    }
+
+    // =====================================================================
+    // BUKU BESAR — jurnal berpasangan (debit = kredit) dari seluruh transaksi
+    // =====================================================================
+    // jenis: aset/beban → saldo normal debit; liabilitas/ekuitas/pendapatan → saldo normal kredit
+    function daftarAkun() {
+      const A = [
+        ['1-101', 'Kas Tunai (BCA 0941426696 a/n Adrian Anugerah Putra)', 'aset'],
+        ['1-102', 'Kas Bank (Bank DKI 50308011105 a/n PT Nuri Vira Pratama)', 'aset'],
+        ['1-103', 'Piutang usaha', 'aset'],
+        ['1-104', 'Persediaan barang', 'aset'],
+        ['1-201', 'Aset tetap (harga perolehan)', 'aset'],
+        ['1-202', 'Akumulasi penyusutan', 'aset'],
+        ['2-101', 'Utang usaha', 'liabilitas'],
+        ['2-102', 'Utang dana talangan pihak ketiga', 'liabilitas'],
+        ['2-103', 'Utang PPN (keluaran − masukan)', 'liabilitas'],
+        ['2-104', 'Utang PPh Badan', 'liabilitas'],
+        ['2-105', 'Utang pinjaman', 'liabilitas'],
+        ['3-101', 'Modal disetor', 'ekuitas'],
+        ['3-102', 'Saldo laba', 'ekuitas'],
+        ['3-103', 'Prive / dividen', 'prive'],
+        ['4-101', 'Penjualan kena PPN', 'pendapatan'],
+        ['4-102', 'Penjualan tidak dipungut PPN', 'pendapatan'],
+        ['5-101', 'Pembelian barang/bahan', 'beban'],
+        ['5-102', 'Penyesuaian persediaan (HPP)', 'beban'],
+      ];
+      JENIS_BIAYA.Operasional.forEach((j, i) => A.push([`6-1${String(i + 1).padStart(2, '0')}`, 'Beban ' + j.charAt(0).toLowerCase() + j.slice(1), 'beban']));
+      A.push(['6-199', 'Beban operasional belum dikategorikan', 'beban']);
+      A.push(['6-201', 'Beban penyusutan aset tetap', 'beban']);
+      A.push(['7-101', 'Pendapatan lain-lain', 'pendapatan']);
+      A.push(['7-102', 'Pendapatan bunga / jasa giro bank', 'pendapatan']);
+      A.push(['8-101', 'Beban pajak penghasilan', 'beban']);
+      return A.map(([kode, nama, jenis]) => ({ kode, nama, jenis, normal: ['aset', 'beban', 'prive'].includes(jenis) ? 'D' : 'K', nominal: ['pendapatan', 'beban', 'prive'].includes(jenis) }));
+    }
+    const akunBeban = (e) => {
+      if (e && e.category === 'HPP') return '5-101';
+      const i = JENIS_BIAYA.Operasional.indexOf(e && e.jenis);
+      return i >= 0 ? `6-1${String(i + 1).padStart(2, '0')}` : '6-199';
+    };
+    const kodeKas = (akun) => AKUN_KAS[akunAman(akun)].kode;
+
+    function jurnalUmum(db, sampaiTahun) {
+      const Y = Number(sampaiTahun), D = `${Y}-12-31`;
+      const upTo = (d) => d && d <= D;
+      const invoices = (db.invoices || []).filter(i => i && i.date);
+      const expenses = (db.expenses || []).filter(e => e && e.date);
+      const assets = (db.assets || []).filter(a => a && a.date);
+      const cashTx = (db.cashTx || []).filter(t => t && t.date && JENIS_KAS[t.type]);
+      const L = normalizeLedger(db.ledger), O = L.opening;
+      const years = [];
+      [...invoices, ...expenses, ...assets, ...cashTx].forEach(x => years.push(Number(x.date.substring(0, 4))));
+      const firstYear = Math.min(Y, ...(years.length ? years : [Y]));
+      const J = [];
+      const tambah = (date, ref, ket, baris, urut) => {
+        const lines = baris.filter(b => b && (Math.abs(num(b[1])) >= 0.005 || Math.abs(num(b[2])) >= 0.005)).map(([akun, d, k]) => ({ akun, d: num(d), k: num(k) }));
+        if (lines.length && upTo(date)) J.push({ date, ref, ket, lines, urut: urut || 5 });
+      };
+      // saldo awal
+      const sl = (O.kasTunai + O.kas + O.piutang + O.persediaan + O.asetTetap - O.akumPenyusutan) - (O.utangUsaha + O.utangPajak + O.pinjaman) - O.modal;
+      tambah(`${firstYear}-01-01`, 'SALDO-AWAL', 'Saldo awal pembukuan', [
+        ['1-101', O.kasTunai, 0], ['1-102', O.kas, 0], ['1-103', O.piutang, 0], ['1-104', O.persediaan, 0], ['1-201', O.asetTetap, 0], ['1-202', 0, O.akumPenyusutan],
+        ['2-101', 0, O.utangUsaha], ['2-104', 0, O.utangPajak], ['2-105', 0, O.pinjaman], ['3-101', 0, O.modal], sl >= 0 ? ['3-102', 0, sl] : ['3-102', -sl, 0],
+      ], 0);
+      // invoice: terbit → piutang; lunas → kas sesuai rekening tujuan
+      invoices.forEach(i => {
+        const sub = num(i.subtotal), ppn = num(i.ppn), tot = num(i.total);
+        tambah(i.date, i.id, `Penjualan — ${i.customer || ''}`, [['1-103', tot, 0], [i.usePpn ? '4-101' : '4-102', 0, tot - ppn], ['2-103', 0, ppn]], 1);
+        const pd = invPaidDate(i);
+        if (pd) { const r = REKENING[invRek(i)]; tambah(pd, i.id, `Pelunasan invoice ${i.id} — ${i.customer || ''} (via ${r.bank} ${r.norek})`, [[kodeKas(r.akun), tot, 0], ['1-103', 0, tot]], 2); }
+      });
+      // beban & pembelian
+      expenses.forEach(e => {
+        const g = expGross(e), ket = e.desc || e.jenis || 'Pengeluaran';
+        const lawan = expIsTalangan(e) ? '2-102' : expIsUtang(e) ? '2-101' : kodeKas(expAkun(e));
+        const ketL = expIsTalangan(e) ? `${ket} (ditalangi ${namaPihak(e)})` : ket;
+        tambah(e.date, e.id || 'BEBAN', ketL, [[akunBeban(e), num(e.amount), 0], ['2-103', num(e.ppnMasukan), 0], [lawan, 0, g]], 3);
+        if (expIsTalangan(e) || expIsUtang(e)) {
+          const pd = expPaidDate(e);
+          if (pd) tambah(pd, e.id || 'BEBAN', expIsTalangan(e) ? `Pengembalian dana talangan ke ${namaPihak(e)} — ${ket}` : `Pelunasan utang — ${ket}`, [[lawan, g, 0], [kodeKas(expAkun(e)), 0, g]], 4);
+        }
+      });
+      // aset tetap
+      assets.forEach(a => tambah(a.date, a.id || 'ASET', `Pembelian aset tetap — ${a.name || ''}`, [['1-201', num(a.cost), 0], [kodeKas(asetAkun(a)), 0, num(a.cost)]], 3));
+      // transaksi kas lain
+      const PASANGAN = { modal: '3-101', prive: '3-103', pinjaman_masuk: '2-105', bayar_pinjaman: '2-105', setor_ppn: '2-103', setor_pph: '2-104', pendapatan_lain: '7-101', bunga_bank: '7-102', terima_piutang_awal: '1-103', bayar_utang_awal: '2-101' };
+      cashTx.forEach(t => {
+        const n = num(t.amount), ket = `${JENIS_KAS[t.type].label}${t.desc ? ' — ' + t.desc : ''}`;
+        if (t.type === 'pindah_kas') { tambah(t.date, t.id || 'KAS', `${ket} (${AKUN_KAS[txAkun(t)].label} → ${AKUN_KAS[txTujuan(t)].label})`, [[kodeKas(txTujuan(t)), n, 0], [kodeKas(txAkun(t)), 0, n]], 3); return; }
+        const k = kodeKas(txAkun(t)), p = PASANGAN[t.type];
+        tambah(t.date, t.id || 'KAS', ket, JENIS_KAS[t.type].arah > 0 ? [[k, n, 0], [p, 0, n]] : [[p, n, 0], [k, 0, n]], 3);
+      });
+      // penyesuaian akhir tahun: penyusutan, persediaan, pajak penghasilan
+      for (let y = firstYear; y <= Y; y++) {
+        const lr = computeLedger(db, y).lr, akhir = `${y}-12-31`;
+        tambah(akhir, `PENY-${y}`, `Penyusutan aset tetap tahun ${y}`, [['6-201', lr.penyusutan, 0], ['1-202', 0, lr.penyusutan]], 8);
+        tambah(akhir, `PERS-${y}`, `Penyesuaian persediaan ${y}: persediaan awal dibebankan ke HPP`, [['5-102', lr.persAwal, 0], ['1-104', 0, lr.persAwal]], 8);
+        tambah(akhir, `PERS-${y}`, `Penyesuaian persediaan ${y}: persediaan akhir (stock opname)`, [['1-104', lr.persAkhir, 0], ['5-102', 0, lr.persAkhir]], 8);
+        tambah(akhir, `PPH-${y}`, `Taksiran PPh Badan tahun ${y}`, [['8-101', lr.bebanPajak, 0], ['2-104', 0, lr.bebanPajak]], 9);
+      }
+      J.sort((a, b) => a.date.localeCompare(b.date) || a.urut - b.urut || String(a.ref).localeCompare(String(b.ref)));
+      J.forEach((j, n) => { j.no = `JU-${j.date.slice(0, 4)}-${String(n + 1).padStart(4, '0')}`; });
+      return { entries: J, firstYear };
+    }
+
+    const daftarAkunCache = daftarAkun();
+    function bukuBesar(db, tahun) {
+      const Y = Number(tahun), awalTahun = `${Y}-01-01`;
+      const { entries } = jurnalUmum(db, Y);
+      const akun = daftarAkun();
+      const byKode = Object.fromEntries(akun.map(a => [a.kode, a]));
+      const nominal = (k) => byKode[k] && byKode[k].nominal;
+      // saldo awal (debit positif). Akun nominal & prive ditutup ke saldo laba setiap akhir tahun.
+      const awal = Object.fromEntries(akun.map(a => [a.kode, 0]));
+      entries.filter(j => j.date < awalTahun).forEach(j => j.lines.forEach(l => {
+        const k = nominal(l.akun) ? '3-102' : l.akun;
+        awal[k] = (awal[k] || 0) + l.d - l.k;
+      }));
+      const jurnalTahun = entries.filter(j => j.date >= awalTahun);
+      const buku = akun.map(a => {
+        let saldo = awal[a.kode] || 0;
+        const rows = [];
+        jurnalTahun.forEach(j => j.lines.forEach(l => { if (l.akun === a.kode) { saldo += l.d - l.k; rows.push({ date: j.date, no: j.no, ref: j.ref, ket: j.ket, d: l.d, k: l.k, saldo }); } }));
+        return { ...a, saldoAwal: awal[a.kode] || 0, rows, saldoAkhir: saldo, mutasiD: rows.reduce((s, r) => s + r.d, 0), mutasiK: rows.reduce((s, r) => s + r.k, 0) };
+      });
+      const neracaSaldo = buku.map(b => ({ kode: b.kode, nama: b.nama, jenis: b.jenis, debit: b.saldoAkhir > 0 ? b.saldoAkhir : 0, kredit: b.saldoAkhir < 0 ? -b.saldoAkhir : 0 }));
+      const totalD = neracaSaldo.reduce((s, r) => s + r.debit, 0), totalK = neracaSaldo.reduce((s, r) => s + r.kredit, 0);
+      const tidakSeimbang = jurnalTahun.filter(j => Math.abs(j.lines.reduce((s, l) => s + l.d - l.k, 0)) >= 0.01);
+      return { year: Y, akun, jurnal: jurnalTahun, buku, neracaSaldo, totalD, totalK, seimbang: Math.abs(totalD - totalK) < 0.5 && !tidakSeimbang.length };
     }
     // //LEDGER-END
 
@@ -1285,8 +1445,12 @@
       const [cashTx, setCashTx] = useState([]);
       const [ledger, setLedger] = useState(() => normalizeLedger(null));
       const [lapYear, setLapYear] = useState(String(new Date().getFullYear()));
+      const [bbTab, setBbTab] = useState('buku');
+      const [bbAkun, setBbAkun] = useState('1-102');
+      const [bbBulan, setBbBulan] = useState('all');
       const [expFilter, setExpFilter] = useState({ year: 'all', category: 'all', jenis: 'all' });
       const [tglKembali, setTglKembali] = useState(todayStr());
+      const [kasKembali, setKasKembali] = useState('bank');
       // Kelola pengguna (admin) & ganti password (semua akun)
       const [userList, setUserList] = useState(null);
       const [userBusy, setUserBusy] = useState(false);
@@ -1297,8 +1461,8 @@
       const [pwForm, setPwForm] = useState(null);
       const authFailedRef = useRef(false);
       const [formError, setFormError] = useState('');
-      const emptyAssetForm = { date: '', name: '', cost: '', kelompok: 'k1' };
-      const emptyCashForm = { date: '', type: 'modal', amount: '', desc: '' };
+      const emptyAssetForm = { date: '', name: '', cost: '', kelompok: 'k1', akunKas: 'bank' };
+      const emptyCashForm = { date: '', type: 'modal', akun: 'bank', amount: '', desc: '' };
       const [assetForm, setAssetForm] = useState(emptyAssetForm);
       const [cashForm, setCashForm] = useState(emptyCashForm);
       const [bulkPaidUntil, setBulkPaidUntil] = useState(`${new Date().getFullYear() - 1}-12-31`);
@@ -1311,8 +1475,8 @@
 
       const defaultPnwNotes = "1. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya jika masa berlaku telah habis.\n2. Sistem pembayaran dan termin waktu dapat didiskusikan lebih lanjut.";
       const emptyPenawaranForm = { date: '', validUntil: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Marketing Dept.', notes: defaultPnwNotes };
-      const emptyInvoiceForm = { date: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
-      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', paidDate: '', talanganDari: '', nonDeductible: false };
+      const emptyInvoiceForm = { date: '', customer: '', usePpn: true, bayarKe: 'dki', items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
+      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', akunKas: 'bank', paidDate: '', talanganDari: '', nonDeductible: false };
       const emptySjForm = { date: '', customer: '', driver: '', vehicle: '', items: [], signerName: '', signerRole: 'Warehouse Dept.' };
       const emptyKwitansiForm = { date: '', receivedFrom: '', amount: 0, purpose: '', signerName: '', signerRole: 'Finance Dept.' };
 
@@ -1482,7 +1646,7 @@
         if (!element) return;
 
         setIsGeneratingPDF(true);
-        const namaLap = { labarugi: 'Laba_Rugi', neraca: 'Neraca', pajak: 'Perhitungan_Pajak' }[printData.part] || 'Laporan_Keuangan';
+        const namaLap = { labarugi: 'Laba_Rugi', neraca: 'Neraca', pajak: 'Perhitungan_Pajak', bukubesar: 'Buku_Besar' }[printData.part] || 'Laporan_Keuangan';
         const fileName = printData.type === 'lapkeu'
             ? `${namaLap}_${printData.item?.year || ''}_PT_Nuri_Vira_Pratama.pdf`
             : (printData.item && !Array.isArray(printData.item) && printData.item.id)
@@ -1525,7 +1689,7 @@
       ];
       // Admin: semua menu. Staff: dokumen & pengeluaran saja (laporan keuangan, saldo awal, backup/pulihkan tertutup).
       const isAdmin = !!currentUser && (currentUser.role ? currentUser.role === 'admin' : currentUser.username === 'admin');
-      const MENU_LAPORAN = ['labarugi', 'neraca', 'pajak', 'datakeu'];
+      const MENU_LAPORAN = ['labarugi', 'neraca', 'pajak', 'bukubesar', 'datakeu'];
       const userMenus = !currentUser ? [] : (isAdmin ? MENU_KEYS : (Array.isArray(currentUser.menus) ? currentUser.menus : STAFF_DEFAULT_MENUS));
       const can = (k) => k === 'dashboard' || userMenus.includes(k);
 
@@ -1679,10 +1843,10 @@
         setFormError('');
         setEditingId(item.id);
         if (type === 'penawaran') { setPenawaranForm({...emptyPenawaranForm, ...item, items: item.items||[]}); setPenawaranModalOpen(true); }
-        else if (type === 'invoice') { setInvoiceForm({...emptyInvoiceForm, ...item, items: item.items||[]}); setInvoiceModalOpen(true); }
+        else if (type === 'invoice') { setInvoiceForm({...emptyInvoiceForm, ...item, bayarKe: invRek(item), items: item.items||[]}); setInvoiceModalOpen(true); }
         else if (type === 'sj') { setSjForm({...emptySjForm, ...item, items: item.items||[]}); setSJModalOpen(true); }
         else if (type === 'kwitansi') { setKwitansiForm({...emptyKwitansiForm, ...item}); setKwitansiModalOpen(true); }
-        else if (type === 'expense') { setExpenseForm({...emptyExpenseForm, ...item}); setExpenseModalOpen(true); }
+        else if (type === 'expense') { setExpenseForm({...emptyExpenseForm, ...item, akunKas: akunAman(item.akunKas)}); setExpenseModalOpen(true); }
       };
 
       const openNewModal = (type) => {
@@ -1722,7 +1886,9 @@
       const handleSaveInvoice = () => {
         const err = validasiItem(invoiceForm, 'invoice'); if (err) { setFormError(err); return; }
         if (invoiceForm.paidDate && invoiceForm.paidDate < invoiceForm.date) { setFormError('Tanggal pelunasan tidak boleh sebelum tanggal invoice.'); return; }
+        if (!REKENING[invoiceForm.bayarKe]) { setFormError('Pilih rekening pembayaran (BCA atau Bank DKI).'); return; }
         const completeItem = { ...invoiceForm, items: (invoiceForm.items||[]).filter(it => String(it?.desc || '').trim()), ...hitungNilaiDokumen(invoiceForm) };
+        delete completeItem.rekManual;
         const id = editingId ? keepOrRenumber(invoices, 'INV', true, editingId, completeItem) : nextDocNumber(invoices, 'INV', true, completeItem);
         const inv = editingId ? { ...completeItem, id } : { ...completeItem, id, autoDocs: true };
         const newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? inv : i) : [...(invoices||[]), inv];
@@ -1781,7 +1947,7 @@
         if (status === 'talangan' && !String(expenseForm.talanganDari || '').trim()) { setFormError('Isi nama pihak ketiga yang menalangi pembayaran.'); return; }
         if (belumDariKas && expenseForm.paidDate && expenseForm.paidDate < expenseForm.date) { setFormError(status === 'talangan' ? 'Tanggal pengembalian tidak boleh sebelum tanggal beban.' : 'Tanggal pelunasan tidak boleh sebelum tanggal beban.'); return; }
         const completeItem = { ...expenseForm, amount: rp(expenseForm.amount), ppnMasukan: rp(expenseForm.ppnMasukan), paymentStatus: status, paidDate: belumDariKas ? (expenseForm.paidDate || '') : '',
-          talanganDari: status === 'talangan' ? String(expenseForm.talanganDari).trim().slice(0, 80) : '', nonDeductible: !!expenseForm.nonDeductible };
+          talanganDari: status === 'talangan' ? String(expenseForm.talanganDari).trim().slice(0, 80) : '', akunKas: akunAman(expenseForm.akunKas), nonDeductible: !!expenseForm.nonDeductible };
         if (editingId) { setExpenses(sortByDateDesc((expenses||[]).map(e => e?.id === editingId ? { ...completeItem, id: e.id } : e))); }
         else {
           const newId = `EXP-${Date.now().toString(36).toUpperCase()}`;   // unik (dulu acak 4 digit, bisa bentrok)
@@ -1804,15 +1970,17 @@
         setCashForm(emptyCashForm);
       };
       const setOpening = (k, v) => setLedger(l => ({ ...l, opening: { ...l.opening, [k]: num(v) } }));
-      const setSaldoBank = (y, v) => setLedger(l => {
+      const setSaldoBank = (y, akun, v) => setLedger(l => {
         const sb = { ...(l.saldoBank || {}) };
-        if (v === '' || v === null) delete sb[y]; else sb[y] = num(v);
+        const o = { ...(sb[y] || {}) };
+        if (v === '' || v === null) delete o[akun]; else o[akun] = num(v);
+        if (Object.keys(o).length) sb[y] = o; else delete sb[y];
         return { ...l, saldoBank: sb };
       });
       // Pengembalian dana talangan ke pihak ketiga (kas PT berkurang pada tanggal ini)
-      const kembalikanTalangan = (ids, tgl) => {
+      const kembalikanTalangan = (ids, tgl, akun) => {
         if (!tgl) return;
-        setExpenses(sortByDateDesc((expenses || []).map(e => e && ids.includes(e.id) ? { ...e, paidDate: maxDate(e.date, tgl) } : e)));
+        setExpenses(sortByDateDesc((expenses || []).map(e => e && ids.includes(e.id) ? { ...e, paidDate: maxDate(e.date, tgl), akunKas: akunAman(akun) } : e)));
       };
       const setClosingInventory = (y, v) => setLedger(l => {
         const ci = { ...l.closingInventory };
@@ -1948,13 +2116,69 @@
         );
       }
 
+      // ---------- Buku besar: tampilan bersama (layar & cetak)
+      const fmtSaldo = (v, normal) => { const x = Math.round(v || 0); if (Math.abs(x) < 1) return formatIDR(0); const pos = x > 0 ? 'D' : 'K'; return `${formatIDR(Math.abs(x))} ${pos}`; };
+      const tabelBukuAkun = (b, cetak) => (
+        <div key={b.kode} className={cetak ? 'mb-5 avoid-break' : ''}>
+          <div className={`flex flex-wrap items-baseline justify-between gap-2 ${cetak ? 'border-b-2 border-slate-900 pb-1 mb-1' : 'mb-2'}`}>
+            <b className={cetak ? 'text-[11px]' : 'text-base text-slate-900'}>{b.kode} · {b.nama}</b>
+            <span className={cetak ? 'text-[9px] text-slate-500' : 'text-xs text-slate-500'}>Saldo normal: {b.normal === 'D' ? 'Debit' : 'Kredit'}</span>
+          </div>
+          <table className={`w-full ${cetak ? 'text-[9.5px]' : 'text-sm min-w-[720px]'}`}>
+            <thead><tr className={`text-left ${cetak ? 'bg-slate-50' : 'text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200'}`}><th className="py-1.5 pl-1">Tanggal</th><th>No. jurnal</th><th>Keterangan</th><th className="text-right">Debit</th><th className="text-right">Kredit</th><th className="text-right pr-1">Saldo</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              <tr className="text-slate-500 italic"><td className="py-1.5 pl-1" colSpan="5">Saldo awal 1 Januari</td><td className="text-right pr-1 tabular-nums">{fmtSaldo(b.saldoAwal)}</td></tr>
+              {b.rows.map((r, n) => (
+                <tr key={n}><td className="py-1.5 pl-1 whitespace-nowrap tabular-nums">{r.date}</td><td className="whitespace-nowrap text-slate-500">{r.no}</td><td className="pr-2">{r.ket}{r.ref && !/^(SALDO|PENY|PERS|PPH)/.test(r.ref) && !String(r.ket).includes(r.ref) ? <span className="text-slate-400"> · {r.ref}</span> : null}</td>
+                  <td className="text-right tabular-nums">{r.d ? formatIDR(r.d) : ''}</td><td className="text-right tabular-nums">{r.k ? formatIDR(r.k) : ''}</td><td className="text-right pr-1 tabular-nums font-semibold whitespace-nowrap">{fmtSaldo(r.saldo)}</td></tr>
+              ))}
+              <tr className="font-bold border-t-2 border-slate-800"><td className="py-1.5 pl-1" colSpan="3">Jumlah mutasi & saldo akhir 31 Desember</td><td className="text-right tabular-nums">{formatIDR(b.mutasiD)}</td><td className="text-right tabular-nums">{formatIDR(b.mutasiK)}</td><td className="text-right pr-1 tabular-nums whitespace-nowrap">{fmtSaldo(b.saldoAkhir)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      );
+      const tabelNeracaSaldo = (bb, cetak) => (
+        <table className={`w-full ${cetak ? 'text-[10px]' : 'text-sm min-w-[560px]'}`}>
+          <thead><tr className={`text-left ${cetak ? 'bg-slate-50 border-y-2 border-slate-900' : 'text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200'}`}><th className="py-1.5 pl-1">Kode</th><th>Nama akun</th><th className="text-right">Debit</th><th className="text-right pr-1">Kredit</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {bb.neracaSaldo.filter(r => Math.abs(r.debit) >= 1 || Math.abs(r.kredit) >= 1).map(r => (
+              <tr key={r.kode}><td className="py-1.5 pl-1 tabular-nums text-slate-500">{r.kode}</td><td>{r.nama}</td><td className="text-right tabular-nums">{r.debit >= 1 ? formatIDR(r.debit) : ''}</td><td className="text-right pr-1 tabular-nums">{r.kredit >= 1 ? formatIDR(r.kredit) : ''}</td></tr>
+            ))}
+            <tr className="font-black border-t-2 border-slate-900"><td className="py-2 pl-1" colSpan="2">JUMLAH</td><td className="text-right tabular-nums">{formatIDR(bb.totalD)}</td><td className="text-right pr-1 tabular-nums">{formatIDR(bb.totalK)}</td></tr>
+          </tbody>
+        </table>
+      );
+      const tabelJurnal = (jurnal, cetak) => (
+        <table className={`w-full ${cetak ? 'text-[9.5px]' : 'text-sm min-w-[760px]'}`}>
+          <thead><tr className={`text-left ${cetak ? 'bg-slate-50 border-y-2 border-slate-900' : 'text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200'}`}><th className="py-1.5 pl-1">Tanggal</th><th>No. jurnal</th><th>Akun / keterangan</th><th className="text-right">Debit</th><th className="text-right pr-1">Kredit</th></tr></thead>
+          {jurnal.map(j => (
+            <tbody key={j.no} className={`border-b border-slate-200 ${cetak ? 'avoid-break' : ''}`}>
+              {j.lines.map((l, n) => {
+                const a = (daftarAkunCache.find(x => x.kode === l.akun) || { nama: l.akun });
+                return (
+                  <tr key={n}>
+                    <td className="pt-1.5 pl-1 align-top whitespace-nowrap tabular-nums">{n === 0 ? j.date : ''}</td>
+                    <td className="pt-1.5 align-top whitespace-nowrap text-slate-500">{n === 0 ? j.no : ''}</td>
+                    <td className={`pt-1.5 ${l.k ? 'pl-8' : ''}`}><span className="text-slate-400 tabular-nums">{l.akun}</span> {a.nama}</td>
+                    <td className="pt-1.5 text-right tabular-nums">{l.d ? formatIDR(l.d) : ''}</td>
+                    <td className="pt-1.5 text-right pr-1 tabular-nums">{l.k ? formatIDR(l.k) : ''}</td>
+                  </tr>
+                );
+              })}
+              <tr><td></td><td></td><td className="pb-2 pt-0.5 text-[11px] italic text-slate-500" colSpan="3">({j.ket}{j.ref && !/^(SALDO|PENY|PERS|PPH)/.test(j.ref) && !String(j.ket).includes(j.ref) ? ` · ${j.ref}` : ''})</td></tr>
+            </tbody>
+          ))}
+        </table>
+      );
+      const dbKeuangan = () => ({ invoices, expenses, assets, cashTx, ledger });
+
       // === TAMPILAN KHUSUS CETAK & PDF ===
       if (printData) {
         const { type, item } = printData;
         if (type === 'lapkeu') {
           const R = item, lr = R.lr, A = R.aset, Lb = R.liabilitas, E = R.ekuitas;
           const part = printData.part || 'semua';
-          const tampil = (p) => part === 'semua' || part === p;
+          const tampil = (p) => p === 'bukubesar' ? part === 'bukubesar' : (part === 'semua' || part === p);
           const row = (label, value, o = {}) => (
             <tr key={o.key || label} className={`${o.total ? 'font-bold border-t border-slate-400' : ''} ${o.grand ? 'font-black border-t-2 border-slate-900 bg-slate-50' : ''} ${o.sub ? 'text-slate-500 text-[10px]' : ''}`}>
               <td className={`py-1 ${o.sub ? 'pl-8' : o.indent ? 'pl-4' : 'pl-1'}`}>{o.sub ? '· ' : ''}{label}</td>
@@ -2031,7 +2255,8 @@
                   <div className="grid grid-cols-2 gap-6">
                     <table className="w-full"><tbody>
                       {head('Aset lancar')}
-                      {row('Kas dan bank', A.kas, { indent: true })}
+                      {row('Kas Tunai (BCA 0941426696)', A.kasTunai, { indent: true })}
+                      {row('Kas Bank (Bank DKI 50308011105)', A.kasBank, { indent: true })}
                       {row('Piutang usaha', A.piutang, { indent: true })}
                       {row('Persediaan', A.persediaan, { indent: true })}
                       {A.ppnLebihBayar > 0 && row('PPN lebih bayar', A.ppnLebihBayar, { indent: true })}
@@ -2088,10 +2313,27 @@
                     {row('Kenaikan (penurunan) kas & bank', AK.kenaikan, { total: true })}
                     {row('Kas & bank awal tahun', AK.kasAwal, { indent: true })}
                     {row('KAS & BANK AKHIR TAHUN', AK.kasAkhir, { grand: true })}
+                    {row('Kas Tunai (BCA)', AK.kasAkhirTunai, { sub: true, key: 'ak-tunai' })}
+                    {row('Kas Bank (Bank DKI)', AK.kasAkhirBank, { sub: true, key: 'ak-bank' })}
                   </tbody></table>
                   {AK.nonKasTalangan > 0 && <p className="mt-3 text-[10px] text-slate-700"><b>Transaksi non-kas:</b> pengeluaran {formatIDR(AK.nonKasTalangan)} dibayar langsung oleh pihak ketiga (dana talangan) dan tidak mengurangi kas & bank; kewajibannya disajikan sebagai utang dana talangan pada laporan posisi keuangan.</p>}
                   {ttd}
                 </div>); })()}
+
+                {tampil('bukubesar') && (() => {
+                  const bb = bukuBesar(dbKeuangan(), R.year);
+                  const t = printData.bbTab || 'buku';
+                  return (
+                    <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                      {kop(t === 'jurnal' ? 'JURNAL UMUM' : t === 'saldo' ? 'NERACA SALDO' : 'BUKU BESAR')}
+                      <p className="text-center font-bold mb-3">{t === 'saldo' ? `Per 31 Desember ${R.year}` : `Periode 1 Januari – 31 Desember ${R.year}`}</p>
+                      {t === 'jurnal' && tabelJurnal(bb.jurnal, true)}
+                      {t === 'saldo' && tabelNeracaSaldo(bb, true)}
+                      {t === 'buku' && bb.buku.filter(b => b.rows.length || Math.abs(b.saldoAwal) >= 1).map(b => tabelBukuAkun(b, true))}
+                      {ttd}
+                    </div>
+                  );
+                })()}
 
                 {tampil('pajak') && <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
                   {kop('PERHITUNGAN PAJAK')}
@@ -2208,18 +2450,11 @@
                         </div>
                       </div>
 
-                      {type === 'invoice' && !doc?.usePpn && (
+                      {type === 'invoice' && (() => { const r = REKENING[invRek(doc)]; return (
                         <div className="mb-4 text-[10px] text-slate-800 font-medium bg-blue-50/50 p-3 rounded-lg border border-blue-100 inline-block avoid-break">
-                          <p className="font-bold text-slate-800 mb-0.5">Keterangan Transfer:</p>
-                          <p>Bank: <b>BCA</b> | Norek: <b className="text-blue-700 text-[11px]">0941426696</b> | A/n: <b>Adrian Anugerah Putra</b></p>
-                        </div>
-                      )}
-                      {type === 'invoice' && doc?.usePpn && (
-                        <div className="mb-4 text-[10px] text-slate-800 font-medium bg-indigo-50/50 p-3 rounded-lg border border-indigo-100 inline-block avoid-break">
-                          <p className="font-bold text-slate-800 mb-0.5">Keterangan Transfer:</p>
-                          <p>Bank: <b>DKI</b> | Norek: <b className="text-indigo-700 text-[11px]">50308011105</b> | A/n: <b>PT Nuri Vira Pratama</b></p>
-                        </div>
-                      )}
+                          <p className="font-bold text-slate-800 mb-0.5">Pembayaran melalui transfer ke:</p>
+                          <p>Bank: <b>{r.bank}</b> | Norek: <b className="text-blue-700 text-[11px]">{r.norek}</b> | A/n: <b>{r.an}</b></p>
+                        </div>); })()}
                       {type === 'penawaran' && (
                         <div className="text-[10px] text-slate-600 mb-4 bg-blue-50/50 p-3 rounded-md border border-blue-100 avoid-break">
                           <p className="font-bold text-slate-800 uppercase mb-0.5">Catatan Penawaran:</p>
@@ -2287,6 +2522,7 @@
 
       // --- 3. MAIN RENDER TAB SCREENS ---
       // Baris tabel laporan (dipakai dasbor, tab laporan, dan cetak)
+
       const lrRow = (label, value, o = {}) => (
         <tr key={o.key || label} className={`${o.total ? 'border-t border-slate-300 font-bold text-slate-900' : o.sub ? 'text-slate-500' : 'text-slate-700'} ${o.grand ? 'border-t-2 border-slate-900 bg-slate-50' : ''}`}>
           <td className={`${o.sub ? 'py-1 pl-10 text-xs' : 'py-2'} ${o.sub ? '' : o.indent ? 'pl-5' : 'pl-1'} ${o.grand ? 'font-black py-3' : ''}`}>{o.sub ? '· ' : ''}{label}{o.note && <span className="block text-[11px] text-slate-400 font-medium">{o.note}</span>}</td>
@@ -2380,7 +2616,7 @@
             {card(`Pendapatan Usaha ${lapYear}`, lr.pendapatanUsaha, `PPN ${formatIDR(lr.penjualanPPN)} · Non-PPN ${formatIDR(lr.penjualanNonPPN)}`, 'bg-blue-50 text-blue-600', IconWallet)}
             {card('Total Beban', bebanTotal, 'HPP + operasional + penyusutan', 'bg-rose-50 text-rose-600', IconTrendingDown)}
             {card('Laba Bersih', lr.labaBersih, 'Setelah estimasi PPh Badan', 'bg-emerald-50 text-emerald-600', IconCalculator)}
-            {card('Kas & Bank', R.aset.kas, `Piutang ${formatIDR(R.aset.piutang)} · per 31 Des ${lapYear}`, 'bg-slate-100 text-slate-700', IconLandmark)}
+            {card('Kas & Bank', R.aset.kas, `Tunai (BCA) ${formatIDR(R.aset.kasTunai)} · Bank (DKI) ${formatIDR(R.aset.kasBank)}`, 'bg-slate-100 text-slate-700', IconLandmark)}
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden">
@@ -2694,6 +2930,7 @@
                       {inv?.paidDate
                         ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 whitespace-nowrap" title="Tanggal pelunasan">Lunas · {inv.paidDate}</span>
                         : <button onClick={() => markInvoicePaid(inv, todayStr())} className="px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 whitespace-nowrap" title="Tandai lunas hari ini (tanggal bisa diubah lewat Edit)">Belum lunas · Tandai lunas</button>}
+                    <span className="block mt-1 text-[11px] font-semibold text-slate-500 whitespace-nowrap">via {REKENING[invRek(inv)].bank} → {AKUN_KAS[invAkun(inv)].label}</span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-col gap-1 items-start">
@@ -2736,8 +2973,20 @@
                     <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama Pelanggan</label><input type="text" value={invoiceForm.customer} onChange={(e) => setInvoiceForm({...invoiceForm, customer: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
                     <div className="sm:col-span-2"><label className="block text-sm font-bold text-slate-700 mb-1">Tanggal Pelunasan <span className="font-medium text-slate-400">— kosongkan jika belum dibayar (dicatat sebagai piutang)</span></label><input type="date" value={invoiceForm.paidDate || ''} onChange={(e) => setInvoiceForm({...invoiceForm, paidDate: e.target.value})} className="w-full sm:w-1/2 bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>
                   </div>
+                  <div>
+                    <span className="block text-sm font-bold text-slate-700 mb-2">Pembayaran melalui</span>
+                    <div className="grid sm:grid-cols-2 gap-3" role="radiogroup" aria-label="Pembayaran melalui">
+                      {Object.entries(REKENING).map(([k, r]) => (
+                        <label key={k} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer ${invoiceForm.bayarKe === k ? 'border-blue-500 bg-blue-50/60' : 'border-slate-200'}`}>
+                          <input type="radio" name="bayarKe" value={k} checked={invoiceForm.bayarKe === k} onChange={() => setInvoiceForm({...invoiceForm, bayarKe: k, rekManual: true})} className="mt-1" />
+                          <span className="text-sm"><b className="block text-slate-800">Bank {r.bank} · {r.norek}</b><span className="text-slate-600">a/n {r.an}</span>
+                            <span className={`block mt-1 text-xs font-bold ${r.akun === 'tunai' ? 'text-amber-700' : 'text-emerald-700'}`}>→ masuk ke {AKUN_KAS[r.akun].label}</span></span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex items-center gap-3 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
-                    <input type="checkbox" id="usePpnToggle" checked={invoiceForm.usePpn} onChange={(e) => setInvoiceForm({...invoiceForm, usePpn: e.target.checked})} className="w-5 h-5 text-blue-600 rounded border-slate-300" />
+                    <input type="checkbox" id="usePpnToggle" checked={invoiceForm.usePpn} onChange={(e) => setInvoiceForm({...invoiceForm, usePpn: e.target.checked, bayarKe: (!editingId && !invoiceForm.rekManual) ? (e.target.checked ? 'dki' : 'bca') : invoiceForm.bayarKe})} className="w-5 h-5 text-blue-600 rounded border-slate-300" />
                     <label htmlFor="usePpnToggle" className="text-sm font-black text-blue-900 cursor-pointer">Tagih PPN <span className="font-semibold text-blue-700">(12% × DPP nilai lain 11/12 — efektif 11%)</span></label>
                   </div>
                   <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 -mt-2">{editingId
@@ -2953,6 +3202,7 @@
           labarugi: ['Laba Rugi', 'Pendapatan, harga pokok, dan beban per jenis biaya untuk tahun buku terpilih.'],
           neraca: ['Neraca', 'Posisi aset, liabilitas, dan ekuitas per 31 Desember tahun buku terpilih.'],
           pajak: ['Pajak (PPN & PPh Badan)', 'PPN per masa dan estimasi PPh Badan dari seluruh peredaran usaha.'],
+          bukubesar: ['Buku Besar', 'Jurnal umum, buku besar per akun, dan neraca saldo — disusun otomatis dari invoice, pengeluaran, dan data keuangan dengan pembukuan berpasangan (setiap transaksi debit = kredit).'],
           pengaturan: ['Data Keuangan', 'Saldo awal, persediaan akhir, pelunasan invoice, aset tetap, dan transaksi kas lain — dasar perhitungan Laba Rugi, Neraca, dan Pajak.'],
         }[lapTab];
         const inputCls = 'w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400 tabular-nums';
@@ -2968,8 +3218,8 @@
               <div className="flex flex-wrap items-center gap-2">
                 {yearSelect()}
                 {lapTab !== 'pengaturan' && <>
-                  <button onClick={() => setPrintData({ type: 'lapkeu', item: R, part: lapTab })} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-800 text-white flex items-center gap-2"><IconPrinter size={16}/> Cetak</button>
-                  <button onClick={() => setPrintData({ type: 'lapkeu', item: R, part: lapTab, autoDownload: true })} className="px-4 py-2 rounded-lg text-sm font-bold bg-rose-600 text-white flex items-center gap-2"><IconDownload size={16}/> PDF</button>
+                  <button onClick={() => setPrintData({ type: 'lapkeu', item: R, part: lapTab, bbTab })} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-800 text-white flex items-center gap-2"><IconPrinter size={16}/> Cetak</button>
+                  <button onClick={() => setPrintData({ type: 'lapkeu', item: R, part: lapTab, bbTab, autoDownload: true })} className="px-4 py-2 rounded-lg text-sm font-bold bg-rose-600 text-white flex items-center gap-2"><IconDownload size={16}/> PDF</button>
                   <button onClick={() => setPrintData({ type: 'lapkeu', item: R })} className="px-3 py-2 rounded-lg text-sm font-bold border border-slate-300 text-slate-600 hover:bg-slate-50" title="Cetak Laba Rugi, Neraca, dan Pajak sekaligus">Cetak semua</button>
                 </>}
               </div>
@@ -3027,7 +3277,8 @@
                 <div className="grid lg:grid-cols-2 gap-8 mt-2">
                   <div className="overflow-x-auto"><table className="w-full text-sm min-w-[340px]"><tbody>
                     {lrHead('Aset lancar')}
-                    {lrRow('Kas dan bank', A.kas, { indent: true })}
+                    {lrRow('Kas Tunai (BCA 0941426696)', A.kasTunai, { indent: true })}
+                    {lrRow('Kas Bank (Bank DKI 50308011105)', A.kasBank, { indent: true })}
                     {lrRow('Piutang usaha', A.piutang, { indent: true })}
                     {lrRow('Persediaan', A.persediaan, { indent: true })}
                     {A.ppnLebihBayar > 0 && lrRow('PPN lebih bayar', A.ppnLebihBayar, { indent: true })}
@@ -3057,11 +3308,11 @@
                     {lrRow('JUMLAH LIABILITAS & EKUITAS', Lb.total + E.total, { grand: true })}
                   </tbody></table></div>
                 </div>
-                {R.cocokBank && (
-                  <div className={`mt-5 rounded-xl border p-4 text-sm ${Math.abs(R.cocokBank.selisih) < 1 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
-                    <b>Pencocokan kas & bank per 31 Des {lapYear}:</b> menurut catatan {formatIDR(A.kas)} · saldo sebenarnya {formatIDR(R.cocokBank.saldo)} · {Math.abs(R.cocokBank.selisih) < 1 ? 'cocok ✓' : <>selisih <b>{formatIDR(R.cocokBank.selisih)}</b> — cek pengeluaran yang dibayar pihak ketiga (harus dicatat sebagai dana talangan) atau transaksi yang belum dicatat.</>}
+                {R.cocokBank.map(c => (
+                  <div key={c.akun} className={`mt-3 rounded-xl border p-4 text-sm ${Math.abs(c.selisih) < 1 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                    <b>Pencocokan {c.label} per 31 Des {lapYear}:</b> menurut catatan {formatIDR(c.catatan)} · saldo sebenarnya {formatIDR(c.saldo)} · {Math.abs(c.selisih) < 1 ? 'cocok ✓' : <>selisih <b>{formatIDR(c.selisih)}</b> — cek pilihan kas pada invoice/pengeluaran, dana talangan, atau transaksi yang belum dicatat.</>}
                   </div>
-                )}
+                ))}
               </div>
             )}
 
@@ -3092,9 +3343,59 @@
                     {lrRow('Kenaikan (penurunan) kas & bank', AK.kenaikan, { total: true })}
                     {lrRow('Kas & bank awal tahun', AK.kasAwal, { indent: true })}
                     {lrRow('KAS & BANK AKHIR TAHUN', AK.kasAkhir, { grand: true })}
+                    {lrRow('Kas Tunai (BCA)', AK.kasAkhirTunai, { sub: true, key: 'ak-tunai' })}
+                    {lrRow('Kas Bank (Bank DKI)', AK.kasAkhirBank, { sub: true, key: 'ak-bank' })}
                   </tbody></table>
                   </div>
                   {AK.nonKasTalangan > 0 && <p className="text-xs text-slate-600 mt-3 bg-violet-50 border border-violet-100 rounded-lg p-3"><b>Transaksi non-kas:</b> pengeluaran {formatIDR(AK.nonKasTalangan)} pada tahun {lapYear} dibayar langsung oleh pihak ketiga (dana talangan) sehingga tidak mengurangi kas & bank PT. Beban tetap diakui di laba rugi; kewajibannya tercatat sebagai utang dana talangan di neraca sampai dikembalikan.</p>}
+                </div>
+              );
+            })()}
+
+            {lapTab === 'bukubesar' && (() => {
+              const bb = bukuBesar(dbKeuangan(), Number(lapYear));
+              const aktif = bb.buku.filter(b => b.rows.length || Math.abs(b.saldoAwal) >= 1);
+              const pilih = bb.buku.find(b => b.kode === bbAkun) || aktif[0] || bb.buku[0];
+              const jurnal = bbBulan === 'all' ? bb.jurnal : bb.jurnal.filter(j => j.date.slice(5, 7) === bbBulan);
+              const tabBtn = (k, l) => <button key={k} onClick={() => setBbTab(k)} className={`px-4 py-2 rounded-lg text-sm font-bold ${bbTab === k ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{l}</button>;
+              return (
+                <div className="space-y-4" data-testid="buku-besar">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {tabBtn('buku', 'Buku Besar per Akun')}{tabBtn('jurnal', 'Jurnal Umum')}{tabBtn('saldo', 'Neraca Saldo')}
+                    <span className={`ml-auto px-3 py-1.5 rounded-full text-xs font-black ${bb.seimbang ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>{bb.seimbang ? `Seimbang: total debit = total kredit (${formatIDR(bb.totalD)})` : 'Tidak seimbang — periksa data'}</span>
+                  </div>
+                  {bbTab === 'buku' && (
+                    <div className={`${box} p-6`}>
+                      <div className="flex flex-wrap items-center gap-2 mb-4">
+                        <label className="text-sm font-bold text-slate-600" htmlFor="pilihAkun">Akun:</label>
+                        <select id="pilihAkun" value={pilih.kode} onChange={(e) => setBbAkun(e.target.value)} className="text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 font-semibold max-w-full">
+                          <optgroup label="Akun yang ada transaksinya">{aktif.map(b => <option key={b.kode} value={b.kode}>{b.kode} · {b.nama}</option>)}</optgroup>
+                          <optgroup label="Akun lain">{bb.buku.filter(b => !aktif.includes(b)).map(b => <option key={b.kode} value={b.kode}>{b.kode} · {b.nama}</option>)}</optgroup>
+                        </select>
+                      </div>
+                      <div className="overflow-x-auto">{tabelBukuAkun(pilih, false)}</div>
+                    </div>
+                  )}
+                  {bbTab === 'jurnal' && (
+                    <div className={`${box} p-6`}>
+                      <div className="flex flex-wrap items-center gap-2 mb-4">
+                        <label className="text-sm font-bold text-slate-600" htmlFor="bulanJurnal">Bulan:</label>
+                        <select id="bulanJurnal" value={bbBulan} onChange={(e) => setBbBulan(e.target.value)} className="text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 font-semibold">
+                          <option value="all">Setahun penuh</option>{BULAN.map((b, n) => <option key={n} value={String(n + 1).padStart(2, '0')}>{b}</option>)}
+                        </select>
+                        <span className="text-sm text-slate-500">{jurnal.length} jurnal</span>
+                      </div>
+                      {jurnal.length ? <div className="overflow-x-auto">{tabelJurnal(jurnal, false)}</div> : <p className="text-sm text-slate-400">Tidak ada jurnal pada periode ini.</p>}
+                    </div>
+                  )}
+                  {bbTab === 'saldo' && (
+                    <div className={`${box} p-6 max-w-3xl`}>
+                      <h3 className="text-lg font-black text-slate-900">Neraca Saldo</h3>
+                      <p className="text-sm text-slate-500 mb-3">Saldo setiap akun per 31 Desember {lapYear}, setelah jurnal penyesuaian (penyusutan, persediaan, pajak).</p>
+                      <div className="overflow-x-auto">{tabelNeracaSaldo(bb, false)}</div>
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500 max-w-3xl">Jurnal dibuat otomatis: invoice → piutang & penjualan; pelunasan → Kas Tunai (BCA) atau Kas Bank (DKI) sesuai rekening di invoice; pengeluaran → beban per jenis biaya dengan lawan kas yang dipilih, utang usaha, atau utang dana talangan; akhir tahun → penyusutan, penyesuaian persediaan, dan taksiran PPh. Akun pendapatan & beban ditutup ke saldo laba setiap awal tahun berikutnya.</p>
                 </div>
               );
             })()}
@@ -3177,7 +3478,7 @@
                     <h3 className="text-lg font-black text-slate-900">1. Saldo awal</h3>
                     <p className="text-sm text-slate-500 mt-1">Posisi keuangan <b>sebelum</b> transaksi pertama yang dicatat di portal ini. Isi sekali saja.</p>
                     <div className="grid sm:grid-cols-2 gap-3 mt-4">
-                      {[['kas', 'Kas & bank'], ['piutang', 'Piutang usaha'], ['persediaan', 'Persediaan barang'], ['asetTetap', 'Aset tetap (harga perolehan)'], ['akumPenyusutan', 'Akumulasi penyusutan'], ['utangUsaha', 'Utang usaha'], ['utangPajak', 'Utang pajak (PPh)'], ['pinjaman', 'Utang pinjaman'], ['modal', 'Modal disetor']].map(([k, l]) => (
+                      {[['kasTunai', 'Kas Tunai (BCA 0941426696)'], ['kas', 'Kas Bank (Bank DKI 50308011105)'], ['piutang', 'Piutang usaha'], ['persediaan', 'Persediaan barang'], ['asetTetap', 'Aset tetap (harga perolehan)'], ['akumPenyusutan', 'Akumulasi penyusutan'], ['utangUsaha', 'Utang usaha'], ['utangPajak', 'Utang pajak (PPh)'], ['pinjaman', 'Utang pinjaman'], ['modal', 'Modal disetor']].map(([k, l]) => (
                         <label key={k} className="block"><span className="block text-xs font-bold text-slate-600 mb-1">{l}</span>
                           <input type="number" min="0" value={ledger.opening[k] || 0} onChange={(e) => setOpening(k, e.target.value)} className={inputCls} /></label>
                       ))}
@@ -3192,9 +3493,14 @@
                       <input type="number" min="0" placeholder="Belum diisi" value={ledger.closingInventory[lapYear] ?? ''} onChange={(e) => setClosingInventory(lapYear, e.target.value)} className={`${inputCls} mt-3`} />
                     </div>
                     <div className={`${box} p-6`}>
-                      <h3 className="text-lg font-black text-slate-900">Saldo kas & bank sebenarnya per 31 Des {lapYear}</h3>
-                      <p className="text-sm text-slate-500 mt-1">Opsional, untuk pencocokan: saldo rekening koran semua rekening PT + uang tunai. Dana yang masih mengendap di rekening (belum dicairkan/dipakai) tetap termasuk di sini. Hasil pencocokan tampil di Neraca.</p>
-                      <input type="number" min="0" aria-label="Saldo kas dan bank sebenarnya" placeholder="Opsional — isi untuk pencocokan" value={(ledger.saldoBank || {})[lapYear] ?? ''} onChange={(e) => setSaldoBank(lapYear, e.target.value)} className={`${inputCls} mt-3`} />
+                      <h3 className="text-lg font-black text-slate-900">Saldo rekening sebenarnya per 31 Des {lapYear}</h3>
+                      <p className="text-sm text-slate-500 mt-1">Opsional, untuk pencocokan dengan rekening koran. Dana yang masih mengendap di rekening (belum dicairkan/dipakai) tetap termasuk. Hasilnya tampil di Neraca.</p>
+                      <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                        {Object.entries(AKUN_KAS).map(([k, a]) => (
+                          <label key={k} className="block"><span className="block text-xs font-bold text-slate-600 mb-1">{a.label} — {a.detail.split(' a/n')[0]}</span>
+                            <input type="number" min="0" aria-label={'Saldo sebenarnya ' + a.label} placeholder="Opsional" value={((ledger.saldoBank || {})[lapYear] || {})[k] ?? ''} onChange={(e) => setSaldoBank(lapYear, k, e.target.value)} className={inputCls} /></label>
+                        ))}
+                      </div>
                     </div>
                     <div className={`${box} p-6`}>
                       <h3 className="text-lg font-black text-slate-900">3. Status pelunasan invoice</h3>
@@ -3213,11 +3519,12 @@
                 <div className={`${box} p-6`}>
                   <h3 className="text-lg font-black text-slate-900">4. Aset tetap</h3>
                   <p className="text-sm text-slate-500 mt-1">Barang tahan lama untuk operasional (kendaraan, mesin isi ulang, komputer, bangunan). Disusutkan garis lurus per kelompok harta Pasal 11 UU PPh, mulai bulan perolehan.</p>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-4 items-end">
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3 mt-4 items-end">
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Tanggal perolehan</span><input type="date" value={assetForm.date} onChange={(e) => setAssetForm({ ...assetForm, date: e.target.value })} className={inputCls} /></label>
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Nama aset</span><input type="text" value={assetForm.name} onChange={(e) => setAssetForm({ ...assetForm, name: e.target.value })} className={inputCls} placeholder="Mis. Mesin pengisi APAR" /></label>
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Harga perolehan</span><input type="number" min="0" value={assetForm.cost} onChange={(e) => setAssetForm({ ...assetForm, cost: e.target.value })} className={inputCls} /></label>
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Kelompok</span><select value={assetForm.kelompok} onChange={(e) => setAssetForm({ ...assetForm, kelompok: e.target.value })} className={inputCls}>{Object.entries(KELOMPOK_HARTA).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Dibayar dari</span><select value={assetForm.akunKas} onChange={(e) => setAssetForm({ ...assetForm, akunKas: e.target.value })} className={inputCls}>{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{a.label}</option>)}</select></label>
                     <button onClick={handleAddAsset} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-900 text-white flex items-center justify-center gap-2"><IconPlus size={16}/> Tambah aset</button>
                   </div>
                   <div className="overflow-x-auto mt-4">
@@ -3226,7 +3533,7 @@
                       <tbody className="divide-y divide-slate-100">
                         {(assets || []).length === 0 ? <tr><td colSpan="7" className="py-4 text-center text-slate-400">Belum ada aset tetap.</td></tr> : assets.map(a => (
                           <tr key={a.id}>
-                            <td className="py-2">{a.date}</td><td className="font-semibold">{a.name}</td><td className="text-xs text-slate-500">{(KELOMPOK_HARTA[a.kelompok] || KELOMPOK_HARTA.k1).label.split(' — ')[0]}</td>
+                            <td className="py-2">{a.date}</td><td className="font-semibold">{a.name}</td><td className="text-xs text-slate-500">{(KELOMPOK_HARTA[a.kelompok] || KELOMPOK_HARTA.k1).label.split(' — ')[0]}<span className="block">{AKUN_KAS[asetAkun(a)].label}</span></td>
                             <td className="text-right tabular-nums">{formatIDR(a.cost)}</td>
                             <td className="text-right tabular-nums">{formatIDR(penyusutanKumulatif(a, Number(lapYear)) - penyusutanKumulatif(a, Number(lapYear) - 1))}</td>
                             <td className="text-right tabular-nums">{formatIDR(num(a.cost) - penyusutanKumulatif(a, Number(lapYear)))}</td>
@@ -3240,10 +3547,11 @@
 
                 <div className={`${box} p-6`}>
                   <h3 className="text-lg font-black text-slate-900">5. Transaksi kas lain</h3>
-                  <p className="text-sm text-slate-500 mt-1">Uang masuk/keluar yang bukan invoice atau beban: setoran modal, prive, pinjaman, setoran pajak, bunga bank, pelunasan saldo awal.</p>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 mt-4 items-end">
+                  <p className="text-sm text-slate-500 mt-1">Uang masuk/keluar yang bukan invoice atau beban: setoran modal, prive, pinjaman, setoran pajak, bunga bank, pelunasan saldo awal, serta pindah dana antara Kas Tunai (BCA) dan Kas Bank (DKI).</p>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3 mt-4 items-end">
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Tanggal</span><input type="date" value={cashForm.date} onChange={(e) => setCashForm({ ...cashForm, date: e.target.value })} className={inputCls} /></label>
-                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Jenis</span><select value={cashForm.type} onChange={(e) => setCashForm({ ...cashForm, type: e.target.value })} className={inputCls}>{Object.entries(JENIS_KAS).map(([k, v]) => <option key={k} value={k}>{v.arah > 0 ? '＋ ' : '－ '}{v.label}</option>)}</select></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Jenis</span><select value={cashForm.type} onChange={(e) => setCashForm({ ...cashForm, type: e.target.value })} className={inputCls}>{Object.entries(JENIS_KAS).map(([k, v]) => <option key={k} value={k}>{v.arah > 0 ? '＋ ' : v.arah < 0 ? '－ ' : '⇄ '}{v.label}</option>)}</select></label>
+                    <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">{cashForm.type === 'pindah_kas' ? 'Dari kas' : 'Kas'}</span><select aria-label="Akun kas transaksi" value={cashForm.akun} onChange={(e) => setCashForm({ ...cashForm, akun: e.target.value })} className={inputCls}>{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{cashForm.type === 'pindah_kas' ? `${a.label} → ${AKUN_KAS[k === 'tunai' ? 'bank' : 'tunai'].label}` : a.label}</option>)}</select></label>
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Jumlah</span><input type="number" min="0" value={cashForm.amount} onChange={(e) => setCashForm({ ...cashForm, amount: e.target.value })} className={inputCls} /></label>
                     <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Keterangan</span><input type="text" value={cashForm.desc} onChange={(e) => setCashForm({ ...cashForm, desc: e.target.value })} className={inputCls} placeholder="Opsional" /></label>
                     <button onClick={handleAddCash} className="px-4 py-2 rounded-lg text-sm font-bold bg-slate-900 text-white flex items-center justify-center gap-2"><IconPlus size={16}/> Catat</button>
@@ -3254,8 +3562,8 @@
                       <tbody className="divide-y divide-slate-100">
                         {(cashTx || []).filter(t => (t.date || '').startsWith(lapYear)).length === 0 ? <tr><td colSpan="5" className="py-4 text-center text-slate-400">Belum ada transaksi kas lain di {lapYear}.</td></tr> : cashTx.filter(t => (t.date || '').startsWith(lapYear)).map(t => (
                           <tr key={t.id}>
-                            <td className="py-2">{t.date}</td><td className="font-semibold">{(JENIS_KAS[t.type] || {}).label || t.type}</td><td className="text-slate-500">{t.desc}</td>
-                            <td className={`text-right tabular-nums font-bold ${(JENIS_KAS[t.type] || {}).arah > 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{(JENIS_KAS[t.type] || {}).arah > 0 ? '+' : '−'} {formatIDR(t.amount)}</td>
+                            <td className="py-2">{t.date}</td><td className="font-semibold">{(JENIS_KAS[t.type] || {}).label || t.type}<span className="block text-[11px] font-semibold text-slate-500">{t.type === 'pindah_kas' ? `${AKUN_KAS[txAkun(t)].label} → ${AKUN_KAS[txTujuan(t)].label}` : AKUN_KAS[txAkun(t)].label}</span></td><td className="text-slate-500">{t.desc}</td>
+                            <td className={`text-right tabular-nums font-bold ${(JENIS_KAS[t.type] || {}).arah > 0 ? 'text-emerald-700' : (JENIS_KAS[t.type] || {}).arah < 0 ? 'text-rose-600' : 'text-slate-600'}`}>{(JENIS_KAS[t.type] || {}).arah > 0 ? '+' : (JENIS_KAS[t.type] || {}).arah < 0 ? '−' : '⇄'} {formatIDR(t.amount)}</td>
                             <td className="text-right"><button onClick={() => setDeleteConfirm({ type: 'cashTx', id: t.id })} className="p-1.5 text-slate-400 hover:text-red-600"><IconTrash2 size={16}/></button></td>
                           </tr>
                         ))}
@@ -3449,18 +3757,19 @@
                   </div>
                   <div className="text-right"><div className="text-[11px] font-bold text-slate-500 uppercase">Belum dikembalikan</div><div className="text-xl font-black text-violet-700 tabular-nums">{formatIDR(totalSisa)}</div></div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 mt-3 text-sm"><label className="font-semibold text-slate-600" htmlFor="tglKembali">Tanggal pengembalian:</label><input id="tglKembali" type="date" value={tglKembali} onChange={(e) => setTglKembali(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm" /></div>
+                <div className="flex flex-wrap items-center gap-2 mt-3 text-sm"><label className="font-semibold text-slate-600" htmlFor="tglKembali">Tanggal pengembalian:</label><input id="tglKembali" type="date" value={tglKembali} onChange={(e) => setTglKembali(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+                  <label className="font-semibold text-slate-600 ml-2" htmlFor="kasKembali">dibayar dari:</label><select id="kasKembali" value={kasKembali} onChange={(e) => setKasKembali(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-semibold">{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{a.label} ({a.detail.split(' a/n')[0]})</option>)}</select></div>
                 <div className="mt-3 divide-y divide-slate-100">
                   {daftarPihak.map(t => (
                     <div key={t.nama} className="py-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div><b className="text-slate-800">{t.nama}</b><span className="text-xs text-slate-500 ml-2">sisa <b className="text-violet-700 tabular-nums">{formatIDR(t.sisa)}</b>{t.kembali > 0 && <> · sudah dikembalikan {formatIDR(t.kembali)}</>}</span></div>
-                        {t.items.length > 1 && <button onClick={() => kembalikanTalangan(t.items.map(e => e.id), tglKembali)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-600 text-white">Kembalikan semua ({formatIDR(t.sisa)})</button>}
+                        {t.items.length > 1 && <button onClick={() => kembalikanTalangan(t.items.map(e => e.id), tglKembali, kasKembali)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-600 text-white">Kembalikan semua ({formatIDR(t.sisa)})</button>}
                       </div>
                       {t.items.length > 0 && <div className="mt-2 space-y-1">{t.items.map(e => (
                         <div key={e.id} className="flex flex-wrap items-center gap-2 text-xs bg-slate-50 rounded-lg px-3 py-2">
                           <span className="text-slate-500 tabular-nums">{e.date}</span><span className="flex-1 min-w-[140px] font-semibold text-slate-700">{e.desc}</span><span className="font-bold tabular-nums">{formatIDR(gross(e))}</span>
-                          <button onClick={() => kembalikanTalangan([e.id], tglKembali)} className="px-2.5 py-1 rounded-md font-bold border border-violet-300 text-violet-700 hover:bg-violet-50">Tandai dikembalikan</button>
+                          <button onClick={() => kembalikanTalangan([e.id], tglKembali, kasKembali)} className="px-2.5 py-1 rounded-md font-bold border border-violet-300 text-violet-700 hover:bg-violet-50">Tandai dikembalikan</button>
                         </div>))}</div>}
                     </div>
                   ))}
@@ -3516,10 +3825,10 @@
                     <td className="px-6 py-4">
                       {exp?.paymentStatus === 'talangan'
                         ? <><span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.paidDate ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-violet-50 border-violet-200 text-violet-700'}`}>{exp?.paidDate ? 'Talangan dikembalikan' : 'Dana talangan'}</span>
-                            <span className="block mt-1 text-[11px] font-semibold text-slate-500">{exp?.talanganDari}{exp?.paidDate ? ` · ${exp.paidDate}` : ''}</span></>
+                            <span className="block mt-1 text-[11px] font-semibold text-slate-500">{exp?.talanganDari}{exp?.paidDate ? ` · ${exp.paidDate} · dari ${AKUN_KAS[expAkun(exp)].label}` : ''}</span></>
                         : exp?.paymentStatus === 'utang' && !exp?.paidDate
                         ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 border border-amber-200 text-amber-700">Utang</span>
-                        : <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700">Lunas</span>}
+                        : <><span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700">Lunas</span><span className="block mt-1 text-[11px] font-semibold text-slate-500 whitespace-nowrap">{AKUN_KAS[expAkun(exp)].label}</span></>}
                     </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1.5 md:opacity-0 md:group-hover:opacity-100">
@@ -3553,7 +3862,8 @@
                   </div>
                   <p className="text-xs text-slate-500 -mt-2">Nominal = harga <b>sebelum PPN</b>. Isi PPN Masukan hanya jika ada faktur pajak dari pemasok (dapat dikreditkan).</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Pembayaran</label><select value={expenseForm.paymentStatus || 'lunas'} onChange={(e) => setExpenseForm({...expenseForm, paymentStatus: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer"><option value="lunas">Lunas — dibayar dari kas/bank PT</option><option value="utang">Belum dibayar (utang ke pemasok)</option><option value="talangan">Dibayar pihak ketiga (dana talangan)</option></select></div>
+                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Pembayaran</label><select aria-label="Sumber pembayaran" value={expenseForm.paymentStatus === 'lunas' || !expenseForm.paymentStatus ? 'lunas:' + akunAman(expenseForm.akunKas) : expenseForm.paymentStatus} onChange={(e) => { const [st, ak] = e.target.value.split(':'); setExpenseForm({...expenseForm, paymentStatus: st, akunKas: ak || akunAman(expenseForm.akunKas)}); }} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer"><option value="lunas:tunai">Lunas — dari Kas Tunai (BCA)</option><option value="lunas:bank">Lunas — dari Kas Bank (Bank DKI)</option><option value="utang">Belum dibayar (utang ke pemasok)</option><option value="talangan">Dana talangan pihak ketiga (otomatis jadi utang)</option></select></div>
+                    {['utang', 'talangan'].includes(expenseForm.paymentStatus) && expenseForm.paidDate && <div className="col-span-2 -mt-1"><label className="block text-sm font-semibold text-slate-700 mb-1">{expenseForm.paymentStatus === 'talangan' ? 'Dikembalikan dari' : 'Dilunasi dari'}</label><select aria-label="Dibayar dari kas" value={akunAman(expenseForm.akunKas)} onChange={(e) => setExpenseForm({...expenseForm, akunKas: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer">{Object.entries(AKUN_KAS).map(([k, a]) => <option key={k} value={k}>{a.label} ({a.detail})</option>)}</select></div>}
                     {expenseForm.paymentStatus === 'utang' && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Tanggal Pelunasan</label><input type="date" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
                     {expenseForm.paymentStatus === 'talangan' && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Dikembalikan tgl</label><input type="date" aria-label="Tanggal dikembalikan" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
                   </div>
@@ -3696,7 +4006,7 @@
               {can('pengeluaran') && <button onClick={() => setActiveTab('pengeluaran')} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === 'pengeluaran' ? 'border-rose-600 text-rose-600 bg-rose-50/50':'border-transparent text-slate-500 hover:bg-slate-50'}`}><IconTrendingDown size={18}/> Pengeluaran</button>}
               {MENU_LAPORAN.some(can) && <>
                 <span className="w-px bg-slate-200 my-2 mx-1 shrink-0"></span>
-                {[['labarugi', 'Laba Rugi', IconBarChart2], ['neraca', 'Neraca', IconLandmark], ['pajak', 'Pajak', IconCalculator], ['datakeu', 'Data Keuangan', IconClipboard]].filter(([k]) => can(k)).map(([k, l, Ic]) => (
+                {[['labarugi', 'Laba Rugi', IconBarChart2], ['neraca', 'Neraca', IconLandmark], ['pajak', 'Pajak', IconCalculator], ['bukubesar', 'Buku Besar', IconBook], ['datakeu', 'Data Keuangan', IconClipboard]].filter(([k]) => can(k)).map(([k, l, Ic]) => (
                   <button key={k} onClick={() => setActiveTab(k)} className={`flex items-center gap-2 px-3 py-3.5 border-b-2 text-sm font-bold whitespace-nowrap ${activeTab === k ? 'border-slate-900 text-slate-900 bg-slate-100':'border-transparent text-slate-500 hover:bg-slate-50'}`}><Ic size={18}/> {l}</button>
                 ))}
               </>}
@@ -3740,7 +4050,7 @@
             {can('suratjalan') && <button onClick={() => setActiveTab('suratjalan')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'suratjalan' ? 'text-emerald-600 bg-emerald-50':'text-slate-400'}`}><IconTruck size={20}/> SJ</button>}
             {can('kwitansi') && <button onClick={() => setActiveTab('kwitansi')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'kwitansi' ? 'text-amber-600 bg-amber-50':'text-slate-400'}`}><IconReceipt size={20}/> KWT</button>}
             {can('pengeluaran') && <button onClick={() => setActiveTab('pengeluaran')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl ${activeTab === 'pengeluaran' ? 'text-rose-600 bg-rose-50':'text-slate-400'}`}><IconTrendingDown size={20}/> Beban</button>}
-            {[['labarugi', 'Laba Rugi', IconBarChart2], ['neraca', 'Neraca', IconLandmark], ['pajak', 'Pajak', IconCalculator], ['datakeu', 'Data Keu', IconClipboard]].filter(([k]) => can(k)).map(([k, l, Ic]) => (
+            {[['labarugi', 'Laba Rugi', IconBarChart2], ['neraca', 'Neraca', IconLandmark], ['pajak', 'Pajak', IconCalculator], ['bukubesar', 'Buku Besar', IconBook], ['datakeu', 'Data Keu', IconClipboard]].filter(([k]) => can(k)).map(([k, l, Ic]) => (
               <button key={k} onClick={() => setActiveTab(k)} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl whitespace-nowrap ${activeTab === k ? 'text-slate-900 bg-slate-100':'text-slate-400'}`}><Ic size={20}/> {l}</button>
             ))}
             {isAdmin && <button onClick={() => setActiveTab('pengguna')} className={`flex flex-col items-center justify-center min-w-[70px] gap-1.5 p-2 rounded-xl whitespace-nowrap ${activeTab === 'pengguna' ? 'text-red-700 bg-red-50':'text-slate-400'}`}><IconUser size={20}/> Pengguna</button>}

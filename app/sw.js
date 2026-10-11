@@ -1,6 +1,6 @@
 /* NVP Operasional — service worker: bisa dibuka offline + notifikasi HP (tampil walau layar terkunci) */
 // Versi diisi otomatis saat build (berubah setiap ada pembaruan) → HP memasang versi baru sendiri
-const VERSI = '20261010-610b8495';
+const VERSI = '20261011-cb1f51b7';
 const CACHE = 'nvp-ops-' + VERSI;
 const FILES = ['./', 'index.html', 'app.js', 'styles.css', 'manifest.webmanifest', '../config.js', 'vendor/react.production.min.js', 'vendor/react-dom.production.min.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png', 'icons/apple-touch-icon.png'];
 const SIMPAN = ['nvp-ops-meta', 'nvp-ops-berkas']; // jangan dihapus saat pembaruan
