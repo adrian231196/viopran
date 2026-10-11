@@ -282,7 +282,7 @@
     const sjFromInvoice = (inv) => ({ date: inv.date, customer: inv.customer, driver: '', vehicle: '', items: sjItemsFromInvoice(inv), signerName: '', signerRole: 'Warehouse Dept.', invoiceId: inv.id });
     const kwtFromInvoice = (inv) => {
       const barang = (inv.items || []).map(it => it && it.desc).filter(Boolean).join(', ');
-      return { date: inv.paidDate && inv.paidDate > inv.date ? inv.paidDate : inv.date, receivedFrom: inv.customer, amount: Math.round(Number(inv.total) || 0),
+      return { date: inv.paidDate && inv.paidDate > inv.date ? inv.paidDate : inv.date, receivedFrom: inv.customer, amount: Math.round(invTagihan(inv)),
         purpose: `Pelunasan Invoice No. ${inv.id}${barang ? ' — ' + barang : ''}`, signerName: inv.signerName || '', signerRole: 'Finance Dept.', invoiceId: inv.id };
     };
     // opts.createSJ / opts.createKwt: buat dokumen bila belum ada. Dokumen yang sudah terhubung selalu diselaraskan.
@@ -369,6 +369,11 @@
     // Invoice lama tanpa pilihan rekening: mengikuti aturan lama (PPN → Bank DKI, non-PPN → BCA)
     const invRek = (inv) => (inv && REKENING[inv.bayarKe]) ? inv.bayarKe : (inv && inv.usePpn ? 'dki' : 'bca');
     const invAkun = (inv) => REKENING[invRek(inv)].akun;
+    // PPN dipungut & disetor langsung oleh pembeli (pemungut PPN, mis. instansi pemerintah/BUMN):
+    // pembeli hanya mentransfer nilai di luar PPN, dan PPN tsb bukan utang PT.
+    const invDipungut = (inv) => !!(inv && inv.usePpn && inv.ppnDipungut && num(inv.ppn) > 0);
+    const invTagihan = (inv) => num(inv && inv.total) - (invDipungut(inv) ? num(inv.ppn) : 0);
+    const invPpnTerutang = (inv) => invDipungut(inv) ? 0 : num(inv && inv.ppn);
     const expAkun = (e) => akunAman(e && e.akunKas);
     const asetAkun = (a) => akunAman(a && a.akunKas);
     const txAkun = (t) => akunAman(t && t.akun);
@@ -532,7 +537,7 @@
       const kasAkunSampai = (batas, akun) => {
         const sd = (d) => d && d <= batas;
         return (akun === 'tunai' ? O.kasTunai : O.kas)
-          + invoices.filter(i => invAkun(i) === akun && sd(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0)
+          + invoices.filter(i => invAkun(i) === akun && sd(invPaidDate(i))).reduce((s, i) => s + invTagihan(i), 0)
           - expenses.reduce((s, e) => s + (expAkunLangsung(e) === akun && sd(e.date) ? expKasLangsung(e) : 0)
               + (expAkun(e) === akun && expSisaNominal(e) && sd(e.paidDate ? maxDate(e.date, e.paidDate) : '') ? expSisaNominal(e) : 0), 0)
           - assets.filter(a => asetAkun(a) === akun && sd(a.date)).reduce((s, a) => s + num(a.cost), 0)
@@ -545,9 +550,9 @@
       const kasTunai = kasAkunSampai(D, 'tunai'), kasBank = kasAkunSampai(D, 'bank');
       const kas = kasTunai + kasBank;
       const piutang = O.piutang - sumTx('terima_piutang_awal', upTo)
-        + invTerbit.filter(i => !upTo(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0);
+        + invTerbit.filter(i => !upTo(invPaidDate(i))).reduce((s, i) => s + invTagihan(i), 0);
       const persediaan = persAkhir(Y);
-      const ppnKeluaranKum = invTerbit.reduce((s, i) => s + num(i.ppn), 0);
+      const ppnKeluaranKum = invTerbit.reduce((s, i) => s + invPpnTerutang(i), 0);
       const ppnMasukanKum = expTercatat.reduce((s, e) => s + num(e.ppnMasukan), 0);
       const ppnNet = ppnKeluaranKum - ppnMasukanKum - sumTx('setor_ppn', upTo);
       const hargaPerolehan = O.asetTetap + asetDibeli.reduce((s, a) => s + num(a.cost), 0);
@@ -602,7 +607,7 @@
       const txY = (type) => sumTx(type, inY);
       const bebanKasY = expenses.reduce((s, e) => s + (inY(e.date) ? expKasLangsung(e) : 0) + (expIsUtang(e) && inY(expPaidDate(e)) ? expGross(e) : 0), 0);
       const operasi = {
-        dariPelanggan: invoices.filter(i => inY(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0) + txY('terima_piutang_awal'),
+        dariPelanggan: invoices.filter(i => inY(invPaidDate(i))).reduce((s, i) => s + invTagihan(i), 0) + txY('terima_piutang_awal'),
         lainLain: txY('pendapatan_lain') + txY('bunga_bank'),
         keBebanPembelian: bebanKasY + txY('bayar_utang_awal'),
         pajak: txY('setor_ppn') + txY('setor_pph'),
@@ -630,10 +635,11 @@
       const ppnMasa = Array.from({ length: 12 }, (_, m) => {
         const mm = `${Y}-${String(m + 1).padStart(2, '0')}`;
         const kel = invoices.filter(i => i.date.startsWith(mm)).reduce((s, i) => s + num(i.ppn), 0);
+        const dipungut = invoices.filter(i => i.date.startsWith(mm) && invDipungut(i)).reduce((s, i) => s + num(i.ppn), 0);
         const mas = expenses.filter(e => e.date.startsWith(mm)).reduce((s, e) => s + num(e.ppnMasukan), 0);
         const dpp = invoices.filter(i => i.usePpn && i.date.startsWith(mm)).reduce((s, i) => s + num(i.subtotal), 0);
         const setor = cashTx.filter(t => t.type === 'setor_ppn' && t.date.startsWith(mm)).reduce((s, t) => s + num(t.amount), 0);
-        return { bulan: m, dpp, keluaran: kel, masukan: mas, kurangBayar: kel - mas, setor };
+        return { bulan: m, dpp, keluaran: kel, dipungut, masukan: mas, kurangBayar: kel - dipungut - mas, setor };
       });
 
       const peringatan = [];
@@ -711,8 +717,8 @@
       ], 0);
       // invoice: terbit → piutang; lunas → kas sesuai rekening tujuan
       invoices.forEach(i => {
-        const sub = num(i.subtotal), ppn = num(i.ppn), tot = num(i.total);
-        tambah(i.date, i.id, `Penjualan — ${i.customer || ''}`, [['1-103', tot, 0], [i.usePpn ? '4-101' : '4-102', 0, tot - ppn], ['2-103', 0, ppn]], 1);
+        const ppn = num(i.ppn), tot = invTagihan(i), ppnUtang = invPpnTerutang(i);
+        tambah(i.date, i.id, `Penjualan — ${i.customer || ''}${invDipungut(i) ? ' (PPN ' + Math.round(ppn).toLocaleString('id-ID') + ' dipungut & disetor pembeli)' : ''}`, [['1-103', tot, 0], [i.usePpn ? '4-101' : '4-102', 0, num(i.total) - ppn], ['2-103', 0, ppnUtang]], 1);
         const pd = invPaidDate(i);
         if (pd) { const r = REKENING[invRek(i)]; tambah(pd, i.id, `Pelunasan invoice ${i.id} — ${i.customer || ''}`, [[kodeKas(r.akun), tot, 0], ['1-103', 0, tot]], 2); }
       });
@@ -1900,6 +1906,7 @@
         if (!REKENING[invoiceForm.bayarKe]) { setFormError('Pilih rekening pembayaran (BCA atau Bank DKI).'); return; }
         const completeItem = { ...invoiceForm, items: (invoiceForm.items||[]).filter(it => String(it?.desc || '').trim()), ...hitungNilaiDokumen(invoiceForm) };
         delete completeItem.rekManual;
+        completeItem.ppnDipungut = !!(completeItem.usePpn && invoiceForm.ppnDipungut);
         const id = editingId ? keepOrRenumber(invoices, 'INV', true, editingId, completeItem) : nextDocNumber(invoices, 'INV', true, completeItem);
         const inv = editingId ? { ...completeItem, id } : { ...completeItem, id, autoDocs: true };
         const newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? inv : i) : [...(invoices||[]), inv];
@@ -2354,9 +2361,9 @@
                   {kop('PERHITUNGAN PAJAK')}
                   <p className="font-black uppercase tracking-wider text-[10px] mb-1">A. PPN tahun {R.year}</p>
                   <table className="w-full mb-4">
-                    <thead><tr className="border-y-2 border-slate-900 bg-slate-50"><th className="py-1 pl-1 text-left">Masa</th><th className="text-right">DPP</th><th className="text-right">Keluaran</th><th className="text-right">Masukan</th><th className="text-right pr-1">Kurang/(lebih) bayar</th></tr></thead>
+                    <thead><tr className="border-y-2 border-slate-900 bg-slate-50"><th className="py-1 pl-1 text-left">Masa</th><th className="text-right">DPP</th><th className="text-right">Keluaran</th><th className="text-right">Dipungut pembeli</th><th className="text-right">Masukan</th><th className="text-right pr-1">Kurang/(lebih) bayar</th></tr></thead>
                     <tbody className="divide-y divide-slate-200">
-                      {R.ppnMasa.map(m => <tr key={m.bulan}><td className="py-0.5 pl-1">{BULAN[m.bulan]}</td><td className="text-right">{formatIDR(m.dpp)}</td><td className="text-right">{formatIDR(m.keluaran)}</td><td className="text-right">{formatIDR(m.masukan)}</td><td className="text-right pr-1">{m.kurangBayar < 0 ? paren(m.kurangBayar) : formatIDR(m.kurangBayar)}</td></tr>)}
+                      {R.ppnMasa.map(m => <tr key={m.bulan}><td className="py-0.5 pl-1">{BULAN[m.bulan]}</td><td className="text-right">{formatIDR(m.dpp)}</td><td className="text-right">{formatIDR(m.keluaran)}</td><td className="text-right">{m.dipungut ? paren(m.dipungut) : formatIDR(0)}</td><td className="text-right">{formatIDR(m.masukan)}</td><td className="text-right pr-1">{m.kurangBayar < 0 ? paren(m.kurangBayar) : formatIDR(m.kurangBayar)}</td></tr>)}
                     </tbody>
                   </table>
                   <p className="font-black uppercase tracking-wider text-[10px] mb-1">B. PPh Badan tahun {R.year}</p>
@@ -2462,6 +2469,10 @@
                           {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">DPP Nilai Lain (11/12)</span><span>{formatIDR(doc?.dppNilaiLain || Math.round(num(doc?.subtotal) * 11 / 12))}</span></div>}
                           {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">PPN 12%</span><span>{formatIDR(doc?.ppn)}</span></div>}
                           <div className="flex justify-between font-black border-t pt-1.5 mt-1.5 text-[13px] text-blue-700"><span>Total Akhir</span><span>{formatIDR(doc?.total)}</span></div>
+                          {type === 'invoice' && invDipungut(doc) && <>
+                            <div className="flex justify-between font-semibold text-slate-600"><span>PPN dipungut & disetor pembeli</span><span>({formatIDR(doc?.ppn)})</span></div>
+                            <div className="flex justify-between font-black border-t pt-1.5 mt-1 text-[12px] text-emerald-700"><span>Jumlah ditransfer</span><span>{formatIDR(invTagihan(doc))}</span></div>
+                          </>}
                         </div>
                       </div>
 
@@ -2576,7 +2587,7 @@
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
               {(can('invoice') || can('kalender')) && kartu(`Invoice ${y}`, invTahun.length, 'Dokumen invoice tahun ini', IconFileText, 'bg-blue-50 text-blue-600', () => setActiveTab(can('invoice') ? 'invoice' : 'kalender'))}
-              {(can('invoice') || can('kalender')) && kartu('Belum lunas', belum.length, `Tagihan ${formatIDR(belum.reduce((a, i) => a + num(i.total), 0))}`, IconWallet, 'bg-amber-50 text-amber-600', () => setActiveTab(can('invoice') ? 'invoice' : 'kalender'))}
+              {(can('invoice') || can('kalender')) && kartu('Belum lunas', belum.length, `Tagihan ${formatIDR(belum.reduce((a, i) => a + invTagihan(i), 0))}`, IconWallet, 'bg-amber-50 text-amber-600', () => setActiveTab(can('invoice') ? 'invoice' : 'kalender'))}
               {(can('suratjalan') || can('invoice')) && kartu('Surat jalan bulan ini', sjBulan.length, 'Termasuk yang dibuat otomatis dari invoice', IconTruck, 'bg-emerald-50 text-emerald-600', () => setActiveTab(can('suratjalan') ? 'suratjalan' : 'invoice'))}
               {can('pengeluaran') && kartu(`Pengeluaran ${y}`, expTahun.length, 'Catatan beban tahun ini', IconTrendingDown, 'bg-rose-50 text-rose-600', () => setActiveTab('pengeluaran'))}
             </div>
@@ -2940,7 +2951,7 @@
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 border rounded-md text-xs font-bold whitespace-nowrap ${inv?.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{inv?.usePpn ? 'PPN':'Non-PPN'}</span>
                     </td>
-                    <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(inv?.total)}</td>
+                    <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(inv?.total)}{invDipungut(inv) && <span className="block text-[11px] font-semibold text-amber-700 whitespace-nowrap" title="PPN dipungut & disetor langsung oleh pembeli">ditransfer {formatIDR(invTagihan(inv))} · PPN dipungut pembeli</span>}</td>
                     <td className="px-6 py-4">
                       {inv?.paidDate
                         ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 whitespace-nowrap" title="Tanggal pelunasan">Lunas · {inv.paidDate}</span>
@@ -3004,6 +3015,13 @@
                     <input type="checkbox" id="usePpnToggle" checked={invoiceForm.usePpn} onChange={(e) => setInvoiceForm({...invoiceForm, usePpn: e.target.checked, bayarKe: (!editingId && !invoiceForm.rekManual) ? (e.target.checked ? 'dki' : 'bca') : invoiceForm.bayarKe})} className="w-5 h-5 text-blue-600 rounded border-slate-300" />
                     <label htmlFor="usePpnToggle" className="text-sm font-black text-blue-900 cursor-pointer">Tagih PPN <span className="font-semibold text-blue-700">(12% × DPP nilai lain 11/12 — efektif 11%)</span></label>
                   </div>
+                  {invoiceForm.usePpn && (
+                    <label className="flex items-start gap-3 p-4 -mt-3 bg-amber-50/60 rounded-xl border border-amber-200 cursor-pointer">
+                      <input type="checkbox" id="ppnDipungut" checked={!!invoiceForm.ppnDipungut} onChange={(e) => setInvoiceForm({...invoiceForm, ppnDipungut: e.target.checked})} className="w-5 h-5 mt-0.5" />
+                      <span className="text-sm"><b className="text-amber-900">PPN dipungut & disetor langsung oleh pembeli</b> <span className="text-amber-800">(pemungut PPN: instansi pemerintah, BUMN, dll.)</span>
+                        <span className="block text-xs text-slate-600 mt-0.5">Pembeli hanya mentransfer nilai <b>di luar PPN</b>. PPN tetap tercantum di invoice & faktur pajak, tetapi <b>bukan utang PPN</b> PT dan tidak dihitung sebagai uang masuk.</span></span>
+                    </label>
+                  )}
                   <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 -mt-2">{editingId
                     ? 'Surat jalan & kwitansi yang terhubung dengan invoice ini ikut diperbarui (pelanggan, barang, nominal, tanggal lunas).'
                     : 'Surat jalan dibuat otomatis saat invoice disimpan. Kwitansi dibuat otomatis saat invoice lunas (isi tanggal pelunasan atau klik “Tandai lunas”).'}</p>
@@ -3208,7 +3226,7 @@
       const renderLaporan = () => {
         const R = ledgerResult, lr = R.lr, A = R.aset, Lb = R.liabilitas, E = R.ekuitas;
         const setorPPhTahun = (cashTx || []).filter(t => t && t.type === 'setor_pph' && (t.date || '').startsWith(lapYear)).reduce((a, t) => a + num(t.amount), 0);
-        const ppnTot = R.ppnMasa.reduce((a, m) => ({ dpp: a.dpp + m.dpp, k: a.k + m.keluaran, m: a.m + m.masukan, s: a.s + m.setor }), { dpp: 0, k: 0, m: 0, s: 0 });
+        const ppnTot = R.ppnMasa.reduce((a, m) => ({ dpp: a.dpp + m.dpp, k: a.k + m.keluaran, p: a.p + m.dipungut, m: a.m + m.masukan, s: a.s + m.setor }), { dpp: 0, k: 0, p: 0, m: 0, s: 0 });
         const O = ledger.opening;
         const saldoLabaAwal = (O.kas + O.piutang + O.persediaan + O.asetTetap - O.akumPenyusutan) - (O.utangUsaha + O.utangPajak + O.pinjaman) - O.modal;
         const belumLunas = (invoices || []).filter(i => i && i.date && !i.paidDate);
@@ -3426,7 +3444,7 @@
                   <div className="overflow-x-auto mt-3">
                     <table className="w-full text-sm min-w-[720px]">
                       <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                        <th className="py-2 pl-1">Masa</th><th className="py-2 text-right">DPP penjualan PPN</th><th className="py-2 text-right">PPN keluaran</th><th className="py-2 text-right">PPN masukan</th><th className="py-2 text-right">Kurang / (lebih) bayar</th><th className="py-2 pr-1 text-right">Disetor</th>
+                        <th className="py-2 pl-1">Masa</th><th className="py-2 text-right">DPP penjualan PPN</th><th className="py-2 text-right">PPN keluaran</th><th className="py-2 text-right" title="PPN yang dipungut & disetor langsung oleh pembeli (pemungut PPN)">Dipungut pembeli</th><th className="py-2 text-right">PPN masukan</th><th className="py-2 text-right">Kurang / (lebih) bayar</th><th className="py-2 pr-1 text-right">Disetor</th>
                       </tr></thead>
                       <tbody className="divide-y divide-slate-100">
                         {R.ppnMasa.map(m => (
@@ -3434,6 +3452,7 @@
                             <td className="py-2 pl-1 font-semibold">{BULAN[m.bulan]}</td>
                             <td className="py-2 text-right tabular-nums">{formatIDR(m.dpp)}</td>
                             <td className="py-2 text-right tabular-nums">{formatIDR(m.keluaran)}</td>
+                            <td className="py-2 text-right tabular-nums">{m.dipungut ? paren(m.dipungut) : formatIDR(0)}</td>
                             <td className="py-2 text-right tabular-nums">{formatIDR(m.masukan)}</td>
                             <td className={`py-2 text-right tabular-nums font-bold ${m.kurangBayar < 0 ? 'text-emerald-700' : ''}`}>{m.kurangBayar < 0 ? paren(m.kurangBayar) : formatIDR(m.kurangBayar)}</td>
                             <td className="py-2 pr-1 text-right tabular-nums">{formatIDR(m.setor)}</td>
@@ -3443,8 +3462,9 @@
                           <td className="py-2.5 pl-1">Jumlah</td>
                           <td className="py-2.5 text-right tabular-nums">{formatIDR(ppnTot.dpp)}</td>
                           <td className="py-2.5 text-right tabular-nums">{formatIDR(ppnTot.k)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{ppnTot.p ? paren(ppnTot.p) : formatIDR(0)}</td>
                           <td className="py-2.5 text-right tabular-nums">{formatIDR(ppnTot.m)}</td>
-                          <td className="py-2.5 text-right tabular-nums">{(ppnTot.k - ppnTot.m) < 0 ? paren(ppnTot.k - ppnTot.m) : formatIDR(ppnTot.k - ppnTot.m)}</td>
+                          <td className="py-2.5 text-right tabular-nums">{(ppnTot.k - ppnTot.p - ppnTot.m) < 0 ? paren(ppnTot.k - ppnTot.p - ppnTot.m) : formatIDR(ppnTot.k - ppnTot.p - ppnTot.m)}</td>
                           <td className="py-2.5 pr-1 text-right tabular-nums">{formatIDR(ppnTot.s)}</td>
                         </tr>
                       </tbody>
@@ -3519,7 +3539,7 @@
                     </div>
                     <div className={`${box} p-6`}>
                       <h3 className="text-lg font-black text-slate-900">3. Status pelunasan invoice</h3>
-                      <p className="text-sm text-slate-500 mt-1"><b className="text-slate-800">{belumLunas.length}</b> invoice belum ditandai lunas ({formatIDR(belumLunas.reduce((a, i) => a + num(i.total), 0))}) dan dihitung sebagai piutang. Untuk invoice lama yang sebenarnya sudah dibayar, tandai sekaligus:</p>
+                      <p className="text-sm text-slate-500 mt-1"><b className="text-slate-800">{belumLunas.length}</b> invoice belum ditandai lunas ({formatIDR(belumLunas.reduce((a, i) => a + invTagihan(i), 0))}) dan dihitung sebagai piutang. Untuk invoice lama yang sebenarnya sudah dibayar, tandai sekaligus:</p>
                       <div className="flex flex-wrap items-end gap-2 mt-3">
                         <label className="block"><span className="block text-xs font-bold text-slate-600 mb-1">Invoice bertanggal s.d.</span><input type="date" value={bulkPaidUntil} onChange={(e) => setBulkPaidUntil(e.target.value)} className={inputCls} /></label>
                         <button onClick={() => bulkMarkPaid(bulkPaidUntil)} disabled={!belumLunas.some(i => i.date <= bulkPaidUntil)} className="px-4 py-2 rounded-lg text-sm font-bold bg-emerald-600 text-white disabled:opacity-40">Tandai lunas ({belumLunas.filter(i => i.date <= bulkPaidUntil).length})</button>
