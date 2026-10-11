@@ -282,8 +282,11 @@
     const sjFromInvoice = (inv) => ({ date: inv.date, customer: inv.customer, driver: '', vehicle: '', items: sjItemsFromInvoice(inv), signerName: '', signerRole: 'Warehouse Dept.', invoiceId: inv.id });
     const kwtFromInvoice = (inv) => {
       const barang = (inv.items || []).map(it => it && it.desc).filter(Boolean).join(', ');
-      return { date: inv.paidDate && inv.paidDate > inv.date ? inv.paidDate : inv.date, receivedFrom: inv.customer, amount: Math.round(invTagihan(inv)),
-        purpose: `Pelunasan Invoice No. ${inv.id}${barang ? ' — ' + barang : ''}`, signerName: inv.signerName || '', signerRole: 'Finance Dept.', invoiceId: inv.id };
+      const pot = [];
+      if (invDipungut(inv)) pot.push(`PPN ${formatIDR(inv.ppn)} dipungut & disetor pembeli`);
+      if (invPphPotong(inv)) pot.push(`${PPH_POTONG[inv.pphJenis].pendek} ${formatIDR(invPphPotong(inv))} dipotong pembeli`);
+      return { date: inv.paidDate && inv.paidDate > inv.date ? inv.paidDate : inv.date, receivedFrom: inv.customer, amount: Math.round(Number(inv.total) || 0),
+        purpose: `Pelunasan Invoice No. ${inv.id}${barang ? ' — ' + barang : ''}${pot.length ? ` (${pot.join('; ')}; diterima bersih ${formatIDR(invDiterima(inv))})` : ''}`, signerName: inv.signerName || '', signerRole: 'Finance Dept.', invoiceId: inv.id };
     };
     // opts.createSJ / opts.createKwt: buat dokumen bila belum ada. Dokumen yang sudah terhubung selalu diselaraskan.
     function syncInvoiceDocs(inv, oldInvId, sjList, kwtList, opts) {
@@ -374,6 +377,15 @@
     const invDipungut = (inv) => !!(inv && inv.usePpn && inv.ppnDipungut && num(inv.ppn) > 0);
     const invTagihan = (inv) => num(inv && inv.total) - (invDipungut(inv) ? num(inv.ppn) : 0);
     const invPpnTerutang = (inv) => invDipungut(inv) ? 0 : num(inv && inv.ppn);
+    // PPh yang dipotong pembeli saat membayar (mis. sekolah/instansi pemerintah: PPh 22 1,5%; jasa: PPh 23 2%).
+    // Uang yang diterima berkurang, tetapi potongan itu menjadi kredit pajak (mengurangi PPh Badan yang harus disetor).
+    const PPH_POTONG = {
+      pph22: { label: 'PPh 22 — 1,5% (pembelian barang oleh bendahara pemerintah: sekolah negeri, dinas, dll.)', pendek: 'PPh 22 (1,5%)', tarif: 0.015 },
+      pph23: { label: 'PPh 23 — 2% (pembayaran jasa)', pendek: 'PPh 23 (2%)', tarif: 0.02 },
+      lain:  { label: 'Lainnya — isi nominal sendiri', pendek: 'PPh dipotong', tarif: 0 },
+    };
+    const invPphPotong = (inv) => (inv && PPH_POTONG[inv.pphJenis]) ? Math.max(0, Math.min(num(inv.pphPotong), invTagihan(inv))) : 0;
+    const invDiterima = (inv) => invTagihan(inv) - invPphPotong(inv);
     const expAkun = (e) => akunAman(e && e.akunKas);
     const asetAkun = (a) => akunAman(a && a.akunKas);
     const txAkun = (t) => akunAman(t && t.akun);
@@ -537,7 +549,7 @@
       const kasAkunSampai = (batas, akun) => {
         const sd = (d) => d && d <= batas;
         return (akun === 'tunai' ? O.kasTunai : O.kas)
-          + invoices.filter(i => invAkun(i) === akun && sd(invPaidDate(i))).reduce((s, i) => s + invTagihan(i), 0)
+          + invoices.filter(i => invAkun(i) === akun && sd(invPaidDate(i))).reduce((s, i) => s + invDiterima(i), 0)
           - expenses.reduce((s, e) => s + (expAkunLangsung(e) === akun && sd(e.date) ? expKasLangsung(e) : 0)
               + (expAkun(e) === akun && expSisaNominal(e) && sd(e.paidDate ? maxDate(e.date, e.paidDate) : '') ? expSisaNominal(e) : 0), 0)
           - assets.filter(a => asetAkun(a) === akun && sd(a.date)).reduce((s, a) => s + num(a.cost), 0)
@@ -576,7 +588,9 @@
         pphTerutangKum += r.bebanPajak;
         if (y < Y) labaDitahanSebelum += r.labaBersih;
       }
-      const pphNet = O.utangPajak + pphTerutangKum - sumTx('setor_pph', upTo);
+      const pphDipotongKum = invoices.filter(i => upTo(invPaidDate(i))).reduce((s, i) => s + invPphPotong(i), 0);
+      const pphDipotongTahun = invoices.filter(i => inYear(invPaidDate(i), Y)).reduce((s, i) => s + invPphPotong(i), 0);
+      const pphNet = O.utangPajak + pphTerutangKum - sumTx('setor_pph', upTo) - pphDipotongKum;
       const pinjaman = O.pinjaman + sumTx('pinjaman_masuk', upTo) - sumTx('bayar_pinjaman', upTo);
       const modal = O.modal + sumTx('modal', upTo);
 
@@ -607,7 +621,7 @@
       const txY = (type) => sumTx(type, inY);
       const bebanKasY = expenses.reduce((s, e) => s + (inY(e.date) ? expKasLangsung(e) : 0) + (expIsUtang(e) && inY(expPaidDate(e)) ? expGross(e) : 0), 0);
       const operasi = {
-        dariPelanggan: invoices.filter(i => inY(invPaidDate(i))).reduce((s, i) => s + invTagihan(i), 0) + txY('terima_piutang_awal'),
+        dariPelanggan: invoices.filter(i => inY(invPaidDate(i))).reduce((s, i) => s + invDiterima(i), 0) + txY('terima_piutang_awal'),
         lainLain: txY('pendapatan_lain') + txY('bunga_bank'),
         keBebanPembelian: bebanKasY + txY('bayar_utang_awal'),
         pajak: txY('setor_ppn') + txY('setor_pph'),
@@ -650,7 +664,7 @@
       [['tunai', kasTunai], ['bank', kasBank]].forEach(([k, v]) => { if (v < 0) peringatan.push(`${AKUN_KAS[k].label} per 31 Des ${Y} minus (${Math.round(v).toLocaleString('id-ID')}). Periksa pilihan kas pada invoice/pengeluaran, catat pengeluaran yang dibayar pihak ketiga sebagai "Dana talangan", atau isi saldo awal di Data Keuangan.`); });
       cocokBank.forEach(c => { if (Math.abs(c.selisih) >= 1) peringatan.push(`${c.label} menurut catatan berbeda ${Math.round(c.selisih).toLocaleString('id-ID')} dari saldo sebenarnya — cek transaksi yang belum dicatat atau salah pilihan kas.`); });
 
-      return { year: Y, firstYear, lr, aset, liabilitas, ekuitas, selisih, ppnMasa, scheme: L.pphScheme, peringatan, arusKas, cocokBank };
+      return { year: Y, firstYear, lr, aset, liabilitas, ekuitas, selisih, ppnMasa, scheme: L.pphScheme, peringatan, arusKas, cocokBank, pphDipotongTahun };
     }
 
     // =====================================================================
@@ -720,7 +734,7 @@
         const ppn = num(i.ppn), tot = invTagihan(i), ppnUtang = invPpnTerutang(i);
         tambah(i.date, i.id, `Penjualan — ${i.customer || ''}${invDipungut(i) ? ' (PPN ' + Math.round(ppn).toLocaleString('id-ID') + ' dipungut & disetor pembeli)' : ''}`, [['1-103', tot, 0], [i.usePpn ? '4-101' : '4-102', 0, num(i.total) - ppn], ['2-103', 0, ppnUtang]], 1);
         const pd = invPaidDate(i);
-        if (pd) { const r = REKENING[invRek(i)]; tambah(pd, i.id, `Pelunasan invoice ${i.id} — ${i.customer || ''}`, [[kodeKas(r.akun), tot, 0], ['1-103', 0, tot]], 2); }
+        if (pd) { const r = REKENING[invRek(i)], pph = invPphPotong(i); tambah(pd, i.id, `Pelunasan invoice ${i.id} — ${i.customer || ''}${pph ? ` (${PPH_POTONG[i.pphJenis].pendek} dipotong pembeli)` : ''}`, [[kodeKas(r.akun), tot - pph, 0], ['2-104', pph, 0], ['1-103', 0, tot]], 2); }
       });
       // beban & pembelian
       expenses.forEach(e => {
@@ -1492,7 +1506,7 @@
 
       const defaultPnwNotes = "1. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya jika masa berlaku telah habis.\n2. Sistem pembayaran dan termin waktu dapat didiskusikan lebih lanjut.";
       const emptyPenawaranForm = { date: '', validUntil: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Marketing Dept.', notes: defaultPnwNotes };
-      const emptyInvoiceForm = { date: '', customer: '', usePpn: true, bayarKe: 'dki', items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
+      const emptyInvoiceForm = { date: '', customer: '', usePpn: true, bayarKe: 'dki', ppnDipungut: false, pphJenis: '', pphNominal: '', items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
       const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', akunKas: 'bank', akunKasLangsung: 'bank', bayarKas: '', paidDate: '', talanganDari: '', nonDeductible: false };
       const emptySjForm = { date: '', customer: '', driver: '', vehicle: '', items: [], signerName: '', signerRole: 'Warehouse Dept.' };
       const emptyKwitansiForm = { date: '', receivedFrom: '', amount: 0, purpose: '', signerName: '', signerRole: 'Finance Dept.' };
@@ -1860,7 +1874,7 @@
         setFormError('');
         setEditingId(item.id);
         if (type === 'penawaran') { setPenawaranForm({...emptyPenawaranForm, ...item, items: item.items||[]}); setPenawaranModalOpen(true); }
-        else if (type === 'invoice') { setInvoiceForm({...emptyInvoiceForm, ...item, bayarKe: invRek(item), items: item.items||[]}); setInvoiceModalOpen(true); }
+        else if (type === 'invoice') { setInvoiceForm({...emptyInvoiceForm, ...item, bayarKe: invRek(item), pphJenis: item.pphJenis || '', pphNominal: item.pphJenis ? String(item.pphPotong || '') : '', items: item.items||[]}); setInvoiceModalOpen(true); }
         else if (type === 'sj') { setSjForm({...emptySjForm, ...item, items: item.items||[]}); setSJModalOpen(true); }
         else if (type === 'kwitansi') { setKwitansiForm({...emptyKwitansiForm, ...item}); setKwitansiModalOpen(true); }
         else if (type === 'expense') { setExpenseForm({...emptyExpenseForm, ...item, akunKas: akunAman(item.akunKas)}); setExpenseModalOpen(true); }
@@ -1907,6 +1921,12 @@
         const completeItem = { ...invoiceForm, items: (invoiceForm.items||[]).filter(it => String(it?.desc || '').trim()), ...hitungNilaiDokumen(invoiceForm) };
         delete completeItem.rekManual;
         completeItem.ppnDipungut = !!(completeItem.usePpn && invoiceForm.ppnDipungut);
+        const jenisPph = PPH_POTONG[invoiceForm.pphJenis] ? invoiceForm.pphJenis : '';
+        const pphAuto = jenisPph ? Math.floor(num(completeItem.subtotal) * PPH_POTONG[jenisPph].tarif) : 0;
+        const pphIsi = String(invoiceForm.pphNominal ?? '') !== '' ? rp(invoiceForm.pphNominal) : pphAuto;
+        if (jenisPph && !(pphIsi > 0)) { setFormError('Isi nominal PPh yang dipotong pembeli.'); return; }
+        completeItem.pphJenis = jenisPph; completeItem.pphPotong = jenisPph ? pphIsi : 0;
+        delete completeItem.pphNominal;
         const id = editingId ? keepOrRenumber(invoices, 'INV', true, editingId, completeItem) : nextDocNumber(invoices, 'INV', true, completeItem);
         const inv = editingId ? { ...completeItem, id } : { ...completeItem, id, autoDocs: true };
         const newArray = editingId ? (invoices||[]).map(i => i?.id === editingId ? inv : i) : [...(invoices||[]), inv];
@@ -2469,9 +2489,10 @@
                           {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">DPP Nilai Lain (11/12)</span><span>{formatIDR(doc?.dppNilaiLain || Math.round(num(doc?.subtotal) * 11 / 12))}</span></div>}
                           {doc?.usePpn && <div className="flex justify-between font-semibold"><span className="text-slate-500">PPN 12%</span><span>{formatIDR(doc?.ppn)}</span></div>}
                           <div className="flex justify-between font-black border-t pt-1.5 mt-1.5 text-[13px] text-blue-700"><span>Total Akhir</span><span>{formatIDR(doc?.total)}</span></div>
-                          {type === 'invoice' && invDipungut(doc) && <>
-                            <div className="flex justify-between font-semibold text-slate-600"><span>PPN dipungut & disetor pembeli</span><span>({formatIDR(doc?.ppn)})</span></div>
-                            <div className="flex justify-between font-black border-t pt-1.5 mt-1 text-[12px] text-emerald-700"><span>Jumlah ditransfer</span><span>{formatIDR(invTagihan(doc))}</span></div>
+                          {type === 'invoice' && (invDipungut(doc) || invPphPotong(doc) > 0) && <>
+                            {invDipungut(doc) && <div className="flex justify-between font-semibold text-slate-600"><span>PPN dipungut & disetor pembeli</span><span>({formatIDR(doc?.ppn)})</span></div>}
+                            {invPphPotong(doc) > 0 && <div className="flex justify-between font-semibold text-slate-600"><span>{PPH_POTONG[doc.pphJenis].pendek} dipotong pembeli</span><span>({formatIDR(invPphPotong(doc))})</span></div>}
+                            <div className="flex justify-between font-black border-t pt-1.5 mt-1 text-[12px] text-emerald-700"><span>Jumlah ditransfer</span><span>{formatIDR(invDiterima(doc))}</span></div>
                           </>}
                         </div>
                       </div>
@@ -2951,7 +2972,7 @@
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 border rounded-md text-xs font-bold whitespace-nowrap ${inv?.usePpn ? 'bg-blue-50 border-blue-100 text-blue-700':'bg-slate-100 border-slate-200 text-slate-600'}`}>{inv?.usePpn ? 'PPN':'Non-PPN'}</span>
                     </td>
-                    <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(inv?.total)}{invDipungut(inv) && <span className="block text-[11px] font-semibold text-amber-700 whitespace-nowrap" title="PPN dipungut & disetor langsung oleh pembeli">ditransfer {formatIDR(invTagihan(inv))} · PPN dipungut pembeli</span>}</td>
+                    <td className="px-6 py-4 text-right font-bold text-slate-800">{formatIDR(inv?.total)}{(invDipungut(inv) || invPphPotong(inv) > 0) && <span className="block text-[11px] font-semibold text-amber-700 whitespace-nowrap" title="Potongan pajak oleh pembeli">ditransfer {formatIDR(invDiterima(inv))} · {[invDipungut(inv) && 'PPN dipungut pembeli', invPphPotong(inv) > 0 && PPH_POTONG[inv.pphJenis].pendek + ' dipotong'].filter(Boolean).join(' · ')}</span>}</td>
                     <td className="px-6 py-4">
                       {inv?.paidDate
                         ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700 whitespace-nowrap" title="Tanggal pelunasan">Lunas · {inv.paidDate}</span>
@@ -3022,6 +3043,27 @@
                         <span className="block text-xs text-slate-600 mt-0.5">Pembeli hanya mentransfer nilai <b>di luar PPN</b>. PPN tetap tercantum di invoice & faktur pajak, tetapi <b>bukan utang PPN</b> PT dan tidak dihitung sebagai uang masuk.</span></span>
                     </label>
                   )}
+                  {(() => {
+                    const nilai = hitungNilaiDokumen(invoiceForm);
+                    const jenis = PPH_POTONG[invoiceForm.pphJenis] ? invoiceForm.pphJenis : '';
+                    const auto = jenis ? Math.floor(num(nilai.subtotal) * PPH_POTONG[jenis].tarif) : 0;
+                    const pph = String(invoiceForm.pphNominal ?? '') !== '' ? rp(invoiceForm.pphNominal) : auto;
+                    const diterima = num(nilai.total) - (invoiceForm.usePpn && invoiceForm.ppnDipungut ? num(nilai.ppn) : 0) - (jenis ? pph : 0);
+                    return (
+                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3" data-testid="potong-pph">
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <label className="block"><span className="block text-sm font-bold text-slate-700 mb-1">Potongan PPh oleh pembeli</span>
+                            <select aria-label="Potongan PPh oleh pembeli" value={jenis} onChange={(e) => setInvoiceForm({...invoiceForm, pphJenis: e.target.value, pphNominal: ''})} className="w-full bg-white border rounded-xl px-3 py-2 text-sm outline-none cursor-pointer">
+                              <option value="">Tidak ada potongan PPh</option>{Object.entries(PPH_POTONG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                            </select></label>
+                          {jenis && <label className="block"><span className="block text-sm font-bold text-slate-700 mb-1">Nominal PPh dipotong (Rp) <span className="font-medium text-slate-400">— dari DPP {formatIDR(nilai.subtotal)}</span></span>
+                            <input type="number" min="0" aria-label="Nominal PPh dipotong" value={String(invoiceForm.pphNominal ?? '') !== '' ? invoiceForm.pphNominal : auto} onChange={(e) => setInvoiceForm({...invoiceForm, pphNominal: e.target.value})} className="w-full bg-white border rounded-xl px-3 py-2 text-sm outline-none" /></label>}
+                        </div>
+                        {jenis && <p className="text-xs text-slate-600">Sesuaikan dengan <b>bukti potong</b> dari pembeli. Potongan ini menjadi <b>kredit pajak</b> PT (mengurangi PPh Badan yang harus disetor), bukan biaya.</p>}
+                        {(jenis || (invoiceForm.usePpn && invoiceForm.ppnDipungut)) && <div className="flex justify-between text-sm bg-white border border-emerald-200 rounded-lg px-3 py-2"><span className="font-semibold text-emerald-800">Diterima di rekening</span><b className="tabular-nums text-emerald-800" data-testid="diterima">{formatIDR(diterima)}</b></div>}
+                      </div>
+                    );
+                  })()}
                   <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 -mt-2">{editingId
                     ? 'Surat jalan & kwitansi yang terhubung dengan invoice ini ikut diperbarui (pelanggan, barang, nominal, tanggal lunas).'
                     : 'Surat jalan dibuat otomatis saat invoice disimpan. Kwitansi dibuat otomatis saat invoice lunas (isi tanggal pelunasan atau klik “Tandai lunas”).'}</p>
@@ -3497,8 +3539,9 @@
                       {lr.pph.pkpFasilitas > 0 && lrRow('PKP yang mendapat fasilitas 50% (Ps. 31E)', lr.pph.pkpFasilitas, { indent: true })}
                     </>) : null}
                     {lrRow('PPh Badan terutang', lr.pph.pph, { total: true, note: lr.pph.metode })}
-                    {lrRow('Kredit pajak / setoran PPh tahun ini', setorPPhTahun, { indent: true, neg: true })}
-                    {lrRow(lr.pph.pph - setorPPhTahun >= 0 ? 'PPh kurang bayar (Ps. 29)' : 'PPh lebih bayar', lr.pph.pph - setorPPhTahun, { grand: true })}
+                    {lrRow('PPh dipotong pembeli (PPh 22/23, sesuai bukti potong)', R.pphDipotongTahun, { indent: true, neg: true })}
+                    {lrRow('Setoran PPh tahun ini (Ps. 25 / lainnya)', setorPPhTahun, { indent: true, neg: true })}
+                    {lrRow(lr.pph.pph - setorPPhTahun - R.pphDipotongTahun >= 0 ? 'PPh kurang bayar (Ps. 29)' : 'PPh lebih bayar', lr.pph.pph - setorPPhTahun - R.pphDipotongTahun, { grand: true })}
                   </tbody></table>
                   </div>
                   {lr.penghasilanNetoFiskal < 0 && ledger.pphScheme === 'umum' && <p className="mt-3 text-xs text-slate-500">Rugi fiskal dapat dikompensasikan ke tahun-tahun berikutnya (maks. 5 tahun) — belum dihitung otomatis.</p>}
