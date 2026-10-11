@@ -367,6 +367,7 @@
     const LEDGER_DEFAULT = {
       opening: { kas: 0, piutang: 0, persediaan: 0, asetTetap: 0, akumPenyusutan: 0, utangUsaha: 0, utangPajak: 0, pinjaman: 0, modal: 0 },
       closingInventory: {},   // { '2026': nilai persediaan akhir hasil stock opname }
+      saldoBank: {},          // { '2026': saldo kas & bank sebenarnya per 31 Des (rekening koran + uang tunai) — untuk pencocokan }
       pphScheme: 'umum',      // 'umum' (Ps.17 + 31E) | 'final05' (PP 55 — masa transisi)
     };
 
@@ -391,14 +392,24 @@
           if (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) closingInventory[y] = Number(v);
         });
       }
-      return { opening, closingInventory, pphScheme: src.pphScheme === 'final05' ? 'final05' : 'umum' };
+      const saldoBank = {};
+      if (src.saldoBank && typeof src.saldoBank === 'object') {
+        Object.keys(src.saldoBank).forEach(y => {
+          const v = src.saldoBank[y];
+          if (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) saldoBank[y] = Number(v);
+        });
+      }
+      return { opening, closingInventory, saldoBank, pphScheme: src.pphScheme === 'final05' ? 'final05' : 'umum' };
     }
 
     // Tanggal efektif pelunasan tidak boleh sebelum tanggal transaksi
     const maxDate = (a, b) => (a && b) ? (a > b ? a : b) : (a || b || '');
     const invPaidDate = (inv) => inv && inv.paidDate ? maxDate(inv.date, inv.paidDate) : '';
     const expIsUtang = (e) => e && e.paymentStatus === 'utang';
-    const expPaidDate = (e) => !e ? '' : (expIsUtang(e) ? (e.paidDate ? maxDate(e.date, e.paidDate) : '') : (e.date || ''));
+    // Dana talangan: beban dibayar dulu oleh pihak ketiga → kas PT belum berkurang, PT berutang ke pihak ketiga sampai dikembalikan
+    const expIsTalangan = (e) => e && e.paymentStatus === 'talangan';
+    const expPaidDate = (e) => !e ? '' : ((expIsUtang(e) || expIsTalangan(e)) ? (e.paidDate ? maxDate(e.date, e.paidDate) : '') : (e.date || ''));
+    const namaPihak = (e) => String((e && e.talanganDari) || '').trim() || 'Pihak ketiga (tanpa nama)';
     const expGross = (e) => num(e && e.amount) + num(e && e.ppnMasukan);
 
     function penyusutanKumulatif(asset, sampaiTahun) {
@@ -484,8 +495,15 @@
       const kasMasukTx = cashTx.filter(t => upTo(t.date) && JENIS_KAS[t.type].arah > 0).reduce((s, t) => s + num(t.amount), 0);
       const kasKeluarTx = cashTx.filter(t => upTo(t.date) && JENIS_KAS[t.type].arah < 0).reduce((s, t) => s + num(t.amount), 0);
 
-      const kas = O.kas + invLunas.reduce((s, i) => s + num(i.total), 0) - expDibayar.reduce((s, e) => s + expGross(e), 0)
-        - asetDibeli.reduce((s, a) => s + num(a.cost), 0) + kasMasukTx - kasKeluarTx;
+      // Kas & bank s.d. tanggal tertentu (beban talangan baru mengurangi kas saat dikembalikan ke pihak ketiga)
+      const kasSampai = (batas) => {
+        const sd = (d) => d && d <= batas;
+        return O.kas + invoices.filter(i => sd(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0)
+          - expenses.filter(e => sd(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0)
+          - assets.filter(a => sd(a.date)).reduce((s, a) => s + num(a.cost), 0)
+          + cashTx.filter(t => sd(t.date)).reduce((s, t) => s + JENIS_KAS[t.type].arah * num(t.amount), 0);
+      };
+      const kas = kasSampai(D);
       const piutang = O.piutang - sumTx('terima_piutang_awal', upTo)
         + invTerbit.filter(i => !upTo(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0);
       const persediaan = persAkhir(Y);
@@ -496,7 +514,16 @@
       const akumulasi = O.akumPenyusutan + assets.reduce((s, a) => s + penyusutanKumulatif(a, Y), 0);
 
       const utangUsaha = O.utangUsaha - sumTx('bayar_utang_awal', upTo)
-        + expTercatat.filter(e => !upTo(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0);
+        + expTercatat.filter(e => !expIsTalangan(e) && !upTo(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0);
+      // Utang dana talangan per pihak ketiga
+      const talanganMap = {};
+      expenses.filter(e => expIsTalangan(e) && upTo(e.date)).forEach(e => {
+        const k = namaPihak(e); const t = talanganMap[k] = talanganMap[k] || { nama: k, total: 0, kembali: 0, sisa: 0, jumlah: 0 };
+        t.total += expGross(e); t.jumlah += 1;
+        if (upTo(expPaidDate(e))) t.kembali += expGross(e); else t.sisa += expGross(e);
+      });
+      const talanganPerPihak = Object.values(talanganMap).sort((a, b) => b.sisa - a.sisa || b.total - a.total);
+      const utangTalangan = talanganPerPihak.reduce((s, t) => s + t.sisa, 0);
       let pphTerutangKum = 0, labaDitahanSebelum = 0;
       for (let y = firstYear; y <= Y; y++) {
         const r = y === Y ? lr : labaRugi(y);
@@ -523,11 +550,38 @@
       };
       aset.lancar = aset.kas + aset.piutang + aset.persediaan + aset.ppnLebihBayar + aset.pphLebihBayar;
       aset.total = aset.lancar + aset.asetTetapNeto;
-      const liabilitas = { utangUsaha, utangPPN: ppnNet > 0 ? ppnNet : 0, utangPPh: pphNet > 0 ? pphNet : 0, pinjaman };
-      liabilitas.total = liabilitas.utangUsaha + liabilitas.utangPPN + liabilitas.utangPPh + liabilitas.pinjaman;
+      const liabilitas = { utangUsaha, utangTalangan, talanganPerPihak, utangPPN: ppnNet > 0 ? ppnNet : 0, utangPPh: pphNet > 0 ? pphNet : 0, pinjaman };
+      liabilitas.total = liabilitas.utangUsaha + liabilitas.utangTalangan + liabilitas.utangPPN + liabilitas.utangPPh + liabilitas.pinjaman;
       const ekuitas = { modal, saldoLabaAwalTahun, labaTahunBerjalan: lr.labaBersih, priveTahunIni, saldoLabaAkhir };
       ekuitas.total = modal + saldoLabaAkhir;
       const selisih = aset.total - (liabilitas.total + ekuitas.total);
+
+      // ---------- Laporan arus kas tahun Y (metode langsung) ----------
+      const inY = (d) => inYear(d, Y);
+      const txY = (type) => sumTx(type, inY);
+      const expKasY = expenses.filter(e => !expIsTalangan(e) && inY(expPaidDate(e)));
+      const operasi = {
+        dariPelanggan: invoices.filter(i => inY(invPaidDate(i))).reduce((s, i) => s + num(i.total), 0) + txY('terima_piutang_awal'),
+        lainLain: txY('pendapatan_lain') + txY('bunga_bank'),
+        keBebanPembelian: expKasY.reduce((s, e) => s + expGross(e), 0) + txY('bayar_utang_awal'),
+        pajak: txY('setor_ppn') + txY('setor_pph'),
+      };
+      operasi.net = operasi.dariPelanggan + operasi.lainLain - operasi.keBebanPembelian - operasi.pajak;
+      const investasi = { asetTetap: assets.filter(a => inY(a.date)).reduce((s, a) => s + num(a.cost), 0) };
+      investasi.net = -investasi.asetTetap;
+      const pendanaan = {
+        modal: txY('modal'), prive: txY('prive'), pinjamanMasuk: txY('pinjaman_masuk'), bayarPinjaman: txY('bayar_pinjaman'),
+        kembaliTalangan: expenses.filter(e => expIsTalangan(e) && inY(expPaidDate(e))).reduce((s, e) => s + expGross(e), 0),
+      };
+      pendanaan.net = pendanaan.modal - pendanaan.prive + pendanaan.pinjamanMasuk - pendanaan.bayarPinjaman - pendanaan.kembaliTalangan;
+      const kasAwal = kasSampai(`${Y - 1}-12-31`);
+      const nonKasTalangan = expenses.filter(e => expIsTalangan(e) && inY(e.date)).reduce((s, e) => s + expGross(e), 0);
+      const arusKas = { operasi, investasi, pendanaan, kenaikan: operasi.net + investasi.net + pendanaan.net, kasAwal, kasAkhir: kas, nonKasTalangan };
+      arusKas.cocok = Math.abs(arusKas.kasAwal + arusKas.kenaikan - arusKas.kasAkhir) < 1;
+
+      // ---------- Pencocokan dengan saldo bank sebenarnya ----------
+      const saldoBankAsli = L.saldoBank[String(Y)];
+      const cocokBank = saldoBankAsli === undefined ? null : { saldo: num(saldoBankAsli), selisih: num(saldoBankAsli) - kas };
 
       // ---------- PPN per masa (bulan) tahun Y ----------
       const ppnMasa = Array.from({ length: 12 }, (_, m) => {
@@ -544,8 +598,10 @@
       if (belumLunasLama) peringatan.push(`${belumLunasLama} invoice tahun lalu belum ditandai lunas — dianggap masih piutang.`);
       if (!lr.persAkhirDiisi && (lr.pembelian > 0 || lr.persAwal > 0)) peringatan.push(`Persediaan akhir ${Y} belum diisi — seluruh pembelian dianggap terjual (HPP).`);
       if (Math.abs(selisih) >= 1) peringatan.push(`Neraca selisih ${Math.round(selisih)} — periksa saldo awal.`);
+      if (kas < 0) peringatan.push(`Kas & bank per 31 Des ${Y} minus (${Math.round(kas).toLocaleString('id-ID')}). Pengeluaran yang sebenarnya dibayar pihak ketiga harus dicatat "Dibayar pihak ketiga (dana talangan)", dan saldo bank awal diisi di Data Keuangan.`);
+      if (cocokBank && Math.abs(cocokBank.selisih) >= 1) peringatan.push(`Kas & bank menurut catatan berbeda ${Math.round(cocokBank.selisih).toLocaleString('id-ID')} dari saldo sebenarnya — cek transaksi yang belum dicatat atau salah sumber dana.`);
 
-      return { year: Y, firstYear, lr, aset, liabilitas, ekuitas, selisih, ppnMasa, scheme: L.pphScheme, peringatan };
+      return { year: Y, firstYear, lr, aset, liabilitas, ekuitas, selisih, ppnMasa, scheme: L.pphScheme, peringatan, arusKas, cocokBank };
     }
     // //LEDGER-END
 
@@ -1230,6 +1286,7 @@
       const [ledger, setLedger] = useState(() => normalizeLedger(null));
       const [lapYear, setLapYear] = useState(String(new Date().getFullYear()));
       const [expFilter, setExpFilter] = useState({ year: 'all', category: 'all', jenis: 'all' });
+      const [tglKembali, setTglKembali] = useState(todayStr());
       // Kelola pengguna (admin) & ganti password (semua akun)
       const [userList, setUserList] = useState(null);
       const [userBusy, setUserBusy] = useState(false);
@@ -1255,7 +1312,7 @@
       const defaultPnwNotes = "1. Harga dapat berubah sewaktu-waktu tanpa pemberitahuan sebelumnya jika masa berlaku telah habis.\n2. Sistem pembayaran dan termin waktu dapat didiskusikan lebih lanjut.";
       const emptyPenawaranForm = { date: '', validUntil: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Marketing Dept.', notes: defaultPnwNotes };
       const emptyInvoiceForm = { date: '', customer: '', usePpn: true, items: [], signerName: '', signerRole: 'Finance Dept.', paidDate: '' };
-      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', paidDate: '', nonDeductible: false };
+      const emptyExpenseForm = { date: '', desc: '', category: 'Operasional', jenis: '', amount: 0, ppnMasukan: 0, paymentStatus: 'lunas', paidDate: '', talanganDari: '', nonDeductible: false };
       const emptySjForm = { date: '', customer: '', driver: '', vehicle: '', items: [], signerName: '', signerRole: 'Warehouse Dept.' };
       const emptyKwitansiForm = { date: '', receivedFrom: '', amount: 0, purpose: '', signerName: '', signerRole: 'Finance Dept.' };
 
@@ -1719,9 +1776,12 @@
         if (!(num(expenseForm.amount) > 0)) { setFormError('Nominal harus lebih dari 0.'); return; }
         if (!(JENIS_BIAYA[expenseForm.category === 'HPP' ? 'HPP' : 'Operasional'] || []).includes(expenseForm.jenis)) { setFormError('Pilih jenis biaya.'); return; }
         if (num(expenseForm.ppnMasukan) < 0) { setFormError('PPN masukan tidak boleh negatif.'); return; }
-        const isUtang = expenseForm.paymentStatus === 'utang';
-        if (isUtang && expenseForm.paidDate && expenseForm.paidDate < expenseForm.date) { setFormError('Tanggal pelunasan tidak boleh sebelum tanggal beban.'); return; }
-        const completeItem = { ...expenseForm, amount: rp(expenseForm.amount), ppnMasukan: rp(expenseForm.ppnMasukan), paymentStatus: isUtang ? 'utang' : 'lunas', paidDate: isUtang ? (expenseForm.paidDate || '') : '', nonDeductible: !!expenseForm.nonDeductible };
+        const status = ['utang', 'talangan'].includes(expenseForm.paymentStatus) ? expenseForm.paymentStatus : 'lunas';
+        const belumDariKas = status !== 'lunas';
+        if (status === 'talangan' && !String(expenseForm.talanganDari || '').trim()) { setFormError('Isi nama pihak ketiga yang menalangi pembayaran.'); return; }
+        if (belumDariKas && expenseForm.paidDate && expenseForm.paidDate < expenseForm.date) { setFormError(status === 'talangan' ? 'Tanggal pengembalian tidak boleh sebelum tanggal beban.' : 'Tanggal pelunasan tidak boleh sebelum tanggal beban.'); return; }
+        const completeItem = { ...expenseForm, amount: rp(expenseForm.amount), ppnMasukan: rp(expenseForm.ppnMasukan), paymentStatus: status, paidDate: belumDariKas ? (expenseForm.paidDate || '') : '',
+          talanganDari: status === 'talangan' ? String(expenseForm.talanganDari).trim().slice(0, 80) : '', nonDeductible: !!expenseForm.nonDeductible };
         if (editingId) { setExpenses(sortByDateDesc((expenses||[]).map(e => e?.id === editingId ? { ...completeItem, id: e.id } : e))); }
         else {
           const newId = `EXP-${Date.now().toString(36).toUpperCase()}`;   // unik (dulu acak 4 digit, bisa bentrok)
@@ -1744,6 +1804,16 @@
         setCashForm(emptyCashForm);
       };
       const setOpening = (k, v) => setLedger(l => ({ ...l, opening: { ...l.opening, [k]: num(v) } }));
+      const setSaldoBank = (y, v) => setLedger(l => {
+        const sb = { ...(l.saldoBank || {}) };
+        if (v === '' || v === null) delete sb[y]; else sb[y] = num(v);
+        return { ...l, saldoBank: sb };
+      });
+      // Pengembalian dana talangan ke pihak ketiga (kas PT berkurang pada tanggal ini)
+      const kembalikanTalangan = (ids, tgl) => {
+        if (!tgl) return;
+        setExpenses(sortByDateDesc((expenses || []).map(e => e && ids.includes(e.id) ? { ...e, paidDate: maxDate(e.date, tgl) } : e)));
+      };
       const setClosingInventory = (y, v) => setLedger(l => {
         const ci = { ...l.closingInventory };
         if (v === '' || v === null) delete ci[y]; else ci[y] = num(v);
@@ -1976,6 +2046,8 @@
                     <table className="w-full"><tbody>
                       {head('Liabilitas')}
                       {row('Utang usaha', Lb.utangUsaha, { indent: true })}
+                      {(Lb.utangTalangan > 0 || (Lb.talanganPerPihak || []).length > 0) && row('Utang dana talangan pihak ketiga', Lb.utangTalangan, { indent: true })}
+                      {(Lb.talanganPerPihak || []).filter(t => t.sisa > 0).map(t => row(t.nama, t.sisa, { sub: true, key: 'tl-' + t.nama }))}
                       {row('Utang PPN', Lb.utangPPN, { indent: true })}
                       {row('Utang PPh Badan', Lb.utangPPh, { indent: true })}
                       {row('Utang pinjaman', Lb.pinjaman, { indent: true })}
@@ -1991,6 +2063,35 @@
                   </div>
                   {ttd}
                 </div>}
+
+                {tampil('neraca') && R.arusKas && (() => { const AK = R.arusKas, Op = AK.operasi, Pd = AK.pendanaan; return (
+                <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
+                  {kop('LAPORAN ARUS KAS')}
+                  <p className="text-center font-bold mb-2">Periode 1 Januari – 31 Desember {R.year}</p>
+                  <table className="w-full"><tbody>
+                    {head('Arus kas dari aktivitas operasi')}
+                    {row('Penerimaan dari pelanggan', Op.dariPelanggan, { indent: true })}
+                    {Op.lainLain > 0 && row('Penerimaan lain-lain & bunga bank', Op.lainLain, { indent: true })}
+                    {row('Pembayaran beban & pembelian', Op.keBebanPembelian, { indent: true, neg: true })}
+                    {Op.pajak > 0 && row('Pembayaran pajak (PPN & PPh)', Op.pajak, { indent: true, neg: true })}
+                    {row('Kas bersih dari aktivitas operasi', Op.net, { total: true })}
+                    {head('Arus kas dari aktivitas investasi')}
+                    {row('Pembelian aset tetap', AK.investasi.asetTetap, { indent: true, neg: true })}
+                    {row('Kas bersih dari aktivitas investasi', AK.investasi.net, { total: true })}
+                    {head('Arus kas dari aktivitas pendanaan')}
+                    {Pd.modal > 0 && row('Setoran modal', Pd.modal, { indent: true })}
+                    {Pd.pinjamanMasuk > 0 && row('Penerimaan pinjaman', Pd.pinjamanMasuk, { indent: true })}
+                    {Pd.bayarPinjaman > 0 && row('Pembayaran pokok pinjaman', Pd.bayarPinjaman, { indent: true, neg: true })}
+                    {Pd.kembaliTalangan > 0 && row('Pengembalian dana talangan pihak ketiga', Pd.kembaliTalangan, { indent: true, neg: true })}
+                    {Pd.prive > 0 && row('Prive / dividen', Pd.prive, { indent: true, neg: true })}
+                    {row('Kas bersih dari aktivitas pendanaan', Pd.net, { total: true })}
+                    {row('Kenaikan (penurunan) kas & bank', AK.kenaikan, { total: true })}
+                    {row('Kas & bank awal tahun', AK.kasAwal, { indent: true })}
+                    {row('KAS & BANK AKHIR TAHUN', AK.kasAkhir, { grand: true })}
+                  </tbody></table>
+                  {AK.nonKasTalangan > 0 && <p className="mt-3 text-[10px] text-slate-700"><b>Transaksi non-kas:</b> pengeluaran {formatIDR(AK.nonKasTalangan)} dibayar langsung oleh pihak ketiga (dana talangan) dan tidak mengurangi kas & bank; kewajibannya disajikan sebagai utang dana talangan pada laporan posisi keuangan.</p>}
+                  {ttd}
+                </div>); })()}
 
                 {tampil('pajak') && <div className="print-page-break max-w-4xl mx-auto bg-white p-6 print-area text-slate-800 mb-6 text-[11px]">
                   {kop('PERHITUNGAN PAJAK')}
@@ -2941,6 +3042,8 @@
                   <div className="overflow-x-auto"><table className="w-full text-sm min-w-[340px]"><tbody>
                     {lrHead('Liabilitas')}
                     {lrRow('Utang usaha', Lb.utangUsaha, { indent: true })}
+                    {(Lb.utangTalangan > 0 || Lb.talanganPerPihak.length > 0) && lrRow('Utang dana talangan pihak ketiga', Lb.utangTalangan, { indent: true })}
+                    {Lb.talanganPerPihak.filter(t => t.sisa > 0).map(t => lrRow(t.nama, t.sisa, { sub: true, key: 'tl-' + t.nama }))}
                     {lrRow('Utang PPN', Lb.utangPPN, { indent: true })}
                     {lrRow('Utang PPh Badan', Lb.utangPPh, { indent: true })}
                     {lrRow('Utang pinjaman', Lb.pinjaman, { indent: true })}
@@ -2954,8 +3057,47 @@
                     {lrRow('JUMLAH LIABILITAS & EKUITAS', Lb.total + E.total, { grand: true })}
                   </tbody></table></div>
                 </div>
+                {R.cocokBank && (
+                  <div className={`mt-5 rounded-xl border p-4 text-sm ${Math.abs(R.cocokBank.selisih) < 1 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                    <b>Pencocokan kas & bank per 31 Des {lapYear}:</b> menurut catatan {formatIDR(A.kas)} · saldo sebenarnya {formatIDR(R.cocokBank.saldo)} · {Math.abs(R.cocokBank.selisih) < 1 ? 'cocok ✓' : <>selisih <b>{formatIDR(R.cocokBank.selisih)}</b> — cek pengeluaran yang dibayar pihak ketiga (harus dicatat sebagai dana talangan) atau transaksi yang belum dicatat.</>}
+                  </div>
+                )}
               </div>
             )}
+
+            {lapTab === 'neraca' && (() => {
+              const AK = R.arusKas, Op = AK.operasi, Pd = AK.pendanaan;
+              return (
+                <div className={`${box} p-6 max-w-3xl`} data-testid="arus-kas">
+                  <h3 className="text-lg font-black text-slate-900">Laporan Arus Kas</h3>
+                  <p className="text-sm text-slate-500">Periode 1 Januari – 31 Desember {lapYear} · metode langsung</p>
+                  <div className="overflow-x-auto mt-2">
+                  <table className="w-full text-sm min-w-[420px]"><tbody>
+                    {lrHead('Arus kas dari aktivitas operasi')}
+                    {lrRow('Penerimaan dari pelanggan', Op.dariPelanggan, { indent: true })}
+                    {Op.lainLain > 0 && lrRow('Penerimaan lain-lain & bunga bank', Op.lainLain, { indent: true })}
+                    {lrRow('Pembayaran beban & pembelian', Op.keBebanPembelian, { indent: true, neg: true })}
+                    {Op.pajak > 0 && lrRow('Pembayaran pajak (PPN & PPh)', Op.pajak, { indent: true, neg: true })}
+                    {lrRow('Kas bersih dari aktivitas operasi', Op.net, { total: true })}
+                    {lrHead('Arus kas dari aktivitas investasi')}
+                    {lrRow('Pembelian aset tetap', AK.investasi.asetTetap, { indent: true, neg: true })}
+                    {lrRow('Kas bersih dari aktivitas investasi', AK.investasi.net, { total: true })}
+                    {lrHead('Arus kas dari aktivitas pendanaan')}
+                    {Pd.modal > 0 && lrRow('Setoran modal', Pd.modal, { indent: true })}
+                    {Pd.pinjamanMasuk > 0 && lrRow('Penerimaan pinjaman', Pd.pinjamanMasuk, { indent: true })}
+                    {Pd.bayarPinjaman > 0 && lrRow('Pembayaran pokok pinjaman', Pd.bayarPinjaman, { indent: true, neg: true })}
+                    {Pd.kembaliTalangan > 0 && lrRow('Pengembalian dana talangan pihak ketiga', Pd.kembaliTalangan, { indent: true, neg: true })}
+                    {Pd.prive > 0 && lrRow('Prive / dividen', Pd.prive, { indent: true, neg: true })}
+                    {lrRow('Kas bersih dari aktivitas pendanaan', Pd.net, { total: true })}
+                    {lrRow('Kenaikan (penurunan) kas & bank', AK.kenaikan, { total: true })}
+                    {lrRow('Kas & bank awal tahun', AK.kasAwal, { indent: true })}
+                    {lrRow('KAS & BANK AKHIR TAHUN', AK.kasAkhir, { grand: true })}
+                  </tbody></table>
+                  </div>
+                  {AK.nonKasTalangan > 0 && <p className="text-xs text-slate-600 mt-3 bg-violet-50 border border-violet-100 rounded-lg p-3"><b>Transaksi non-kas:</b> pengeluaran {formatIDR(AK.nonKasTalangan)} pada tahun {lapYear} dibayar langsung oleh pihak ketiga (dana talangan) sehingga tidak mengurangi kas & bank PT. Beban tetap diakui di laba rugi; kewajibannya tercatat sebagai utang dana talangan di neraca sampai dikembalikan.</p>}
+                </div>
+              );
+            })()}
 
             {lapTab === 'pajak' && (
               <div className="space-y-6">
@@ -3048,6 +3190,11 @@
                       <h3 className="text-lg font-black text-slate-900">2. Persediaan akhir {lapYear}</h3>
                       <p className="text-sm text-slate-500 mt-1">Nilai stok barang yang belum terjual per 31 Desember {lapYear} (hasil stock opname, dinilai dengan harga beli). Mengurangi HPP.</p>
                       <input type="number" min="0" placeholder="Belum diisi" value={ledger.closingInventory[lapYear] ?? ''} onChange={(e) => setClosingInventory(lapYear, e.target.value)} className={`${inputCls} mt-3`} />
+                    </div>
+                    <div className={`${box} p-6`}>
+                      <h3 className="text-lg font-black text-slate-900">Saldo kas & bank sebenarnya per 31 Des {lapYear}</h3>
+                      <p className="text-sm text-slate-500 mt-1">Opsional, untuk pencocokan: saldo rekening koran semua rekening PT + uang tunai. Dana yang masih mengendap di rekening (belum dicairkan/dipakai) tetap termasuk di sini. Hasil pencocokan tampil di Neraca.</p>
+                      <input type="number" min="0" aria-label="Saldo kas dan bank sebenarnya" placeholder="Opsional — isi untuk pencocokan" value={(ledger.saldoBank || {})[lapYear] ?? ''} onChange={(e) => setSaldoBank(lapYear, e.target.value)} className={`${inputCls} mt-3`} />
                     </div>
                     <div className={`${box} p-6`}>
                       <h3 className="text-lg font-black text-slate-900">3. Status pelunasan invoice</h3>
@@ -3285,6 +3432,42 @@
             </select>
             <span className="ml-auto text-sm text-slate-500">{daftar.length} catatan · <b className="text-rose-600 tabular-nums">{formatIDR(totalDaftar)}</b></span>
           </div>
+          {(() => {
+            const tl = (expenses || []).filter(e => e && e.paymentStatus === 'talangan');
+            if (!tl.length) return null;
+            const gross = (e) => num(e.amount) + num(e.ppnMasukan);
+            const per = {};
+            tl.forEach(e => { const k = String(e.talanganDari || '').trim() || 'Pihak ketiga (tanpa nama)'; const t = per[k] = per[k] || { nama: k, sisa: 0, kembali: 0, items: [] }; if (e.paidDate) t.kembali += gross(e); else { t.sisa += gross(e); t.items.push(e); } });
+            const daftarPihak = Object.values(per).sort((a, b) => b.sisa - a.sisa);
+            const totalSisa = daftarPihak.reduce((a, t) => a + t.sisa, 0);
+            return (
+              <div className="bg-white rounded-2xl border border-violet-200 shadow-sm p-5" data-testid="panel-talangan">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-black text-violet-900 uppercase tracking-wider">Dana talangan pihak ketiga</h3>
+                    <p className="text-xs text-slate-500 mt-1 max-w-xl">Pengeluaran PT yang dibayar dulu oleh pihak lain. Uang PT di bank belum berkurang; PT masih berutang sebesar sisa di bawah. Saat PT mengganti, catat tanggal pengembaliannya.</p>
+                  </div>
+                  <div className="text-right"><div className="text-[11px] font-bold text-slate-500 uppercase">Belum dikembalikan</div><div className="text-xl font-black text-violet-700 tabular-nums">{formatIDR(totalSisa)}</div></div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 mt-3 text-sm"><label className="font-semibold text-slate-600" htmlFor="tglKembali">Tanggal pengembalian:</label><input id="tglKembali" type="date" value={tglKembali} onChange={(e) => setTglKembali(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm" /></div>
+                <div className="mt-3 divide-y divide-slate-100">
+                  {daftarPihak.map(t => (
+                    <div key={t.nama} className="py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div><b className="text-slate-800">{t.nama}</b><span className="text-xs text-slate-500 ml-2">sisa <b className="text-violet-700 tabular-nums">{formatIDR(t.sisa)}</b>{t.kembali > 0 && <> · sudah dikembalikan {formatIDR(t.kembali)}</>}</span></div>
+                        {t.items.length > 1 && <button onClick={() => kembalikanTalangan(t.items.map(e => e.id), tglKembali)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-violet-600 text-white">Kembalikan semua ({formatIDR(t.sisa)})</button>}
+                      </div>
+                      {t.items.length > 0 && <div className="mt-2 space-y-1">{t.items.map(e => (
+                        <div key={e.id} className="flex flex-wrap items-center gap-2 text-xs bg-slate-50 rounded-lg px-3 py-2">
+                          <span className="text-slate-500 tabular-nums">{e.date}</span><span className="flex-1 min-w-[140px] font-semibold text-slate-700">{e.desc}</span><span className="font-bold tabular-nums">{formatIDR(gross(e))}</span>
+                          <button onClick={() => kembalikanTalangan([e.id], tglKembali)} className="px-2.5 py-1 rounded-md font-bold border border-violet-300 text-violet-700 hover:bg-violet-50">Tandai dikembalikan</button>
+                        </div>))}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {rekap.length > 0 && (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider mb-3">Rekap per jenis biaya</h3>
@@ -3331,7 +3514,10 @@
                     <td className="px-6 py-4 text-right font-bold text-rose-600">{formatIDR(exp?.amount)}</td>
                     <td className="px-6 py-4 text-right text-sm text-slate-600">{num(exp?.ppnMasukan) ? formatIDR(exp.ppnMasukan) : '—'}</td>
                     <td className="px-6 py-4">
-                      {exp?.paymentStatus === 'utang' && !exp?.paidDate
+                      {exp?.paymentStatus === 'talangan'
+                        ? <><span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${exp?.paidDate ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-violet-50 border-violet-200 text-violet-700'}`}>{exp?.paidDate ? 'Talangan dikembalikan' : 'Dana talangan'}</span>
+                            <span className="block mt-1 text-[11px] font-semibold text-slate-500">{exp?.talanganDari}{exp?.paidDate ? ` · ${exp.paidDate}` : ''}</span></>
+                        : exp?.paymentStatus === 'utang' && !exp?.paidDate
                         ? <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 border border-amber-200 text-amber-700">Utang</span>
                         : <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 border border-emerald-100 text-emerald-700">Lunas</span>}
                     </td>
@@ -3367,9 +3553,18 @@
                   </div>
                   <p className="text-xs text-slate-500 -mt-2">Nominal = harga <b>sebelum PPN</b>. Isi PPN Masukan hanya jika ada faktur pajak dari pemasok (dapat dikreditkan).</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Pembayaran</label><select value={expenseForm.paymentStatus || 'lunas'} onChange={(e) => setExpenseForm({...expenseForm, paymentStatus: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer"><option value="lunas">Lunas (dibayar tunai/transfer)</option><option value="utang">Belum dibayar (utang)</option></select></div>
+                    <div><label className="block text-sm font-semibold text-slate-700 mb-1">Pembayaran</label><select value={expenseForm.paymentStatus || 'lunas'} onChange={(e) => setExpenseForm({...expenseForm, paymentStatus: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none cursor-pointer"><option value="lunas">Lunas — dibayar dari kas/bank PT</option><option value="utang">Belum dibayar (utang ke pemasok)</option><option value="talangan">Dibayar pihak ketiga (dana talangan)</option></select></div>
                     {expenseForm.paymentStatus === 'utang' && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Tanggal Pelunasan</label><input type="date" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
+                    {expenseForm.paymentStatus === 'talangan' && <div><label className="block text-sm font-semibold text-slate-700 mb-1">Dikembalikan tgl</label><input type="date" aria-label="Tanggal dikembalikan" value={expenseForm.paidDate || ''} onChange={(e) => setExpenseForm({...expenseForm, paidDate: e.target.value})} className="w-full bg-slate-50 border rounded-xl px-4 py-2 text-sm outline-none" /></div>}
                   </div>
+                  {expenseForm.paymentStatus === 'talangan' && (
+                    <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2 -mt-1">
+                      <label className="block"><span className="block text-sm font-semibold text-slate-700 mb-1">Nama pihak ketiga yang membayar</span>
+                        <input type="text" list="daftarPihakTalangan" placeholder="mis. CV Mitra Jaya / Bapak Andi" value={expenseForm.talanganDari || ''} onChange={(e) => setExpenseForm({...expenseForm, talanganDari: e.target.value})} className="w-full bg-white border rounded-xl px-4 py-2 text-sm outline-none" /></label>
+                      <datalist id="daftarPihakTalangan">{[...new Set((expenses || []).filter(x => x && x.paymentStatus === 'talangan' && x.talanganDari).map(x => x.talanganDari))].map(n => <option key={n} value={n} />)}</datalist>
+                      <p className="text-xs text-violet-900">Beban tetap masuk laba rugi, tetapi <b>kas/bank PT tidak berkurang</b>. Nilainya dicatat sebagai <b>utang dana talangan</b> kepada pihak ini sampai dikembalikan. Kosongkan tanggal dikembalikan jika belum diganti.</p>
+                    </div>
+                  )}
                   <label className="flex items-start gap-3 bg-slate-50 border rounded-xl p-3 cursor-pointer">
                     <input type="checkbox" checked={!!expenseForm.nonDeductible} onChange={(e) => setExpenseForm({...expenseForm, nonDeductible: e.target.checked})} className="w-4 h-4 mt-0.5" />
                     <span className="text-xs text-slate-600"><b className="text-slate-800 block text-sm">Tidak dapat dikurangkan secara pajak</b>Contoh: sumbangan, sanksi/denda pajak, biaya pribadi, jamuan tanpa daftar nominatif. Tetap tercatat di laba rugi, tetapi dikoreksi positif di perhitungan PPh.</span>
