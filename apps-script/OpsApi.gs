@@ -105,7 +105,7 @@ function opsHandle_(body) {
       opsSave_(D);
       var r = opsKirimPush_(D, [n], true);
       opsSave_(D);
-      return { ok: true, devices: r.terkirim, gagal: r.gagal };
+      return { ok: true, devices: r.terkirim, gagal: r.gagal, wa: r.wa.terkirim };
     }
     return { ok: false, error: 'ACTION_TIDAK_DIKENAL' };
   });
@@ -579,32 +579,96 @@ function opsJagaPengeluaran_(incoming, currentRaw) {
 // ---------------------------------------------------------------------
 function opsKirimPush_(D, notifs, termasukPengirim) {
   var users = opsUsers_();
-  var target = {};
+  var target = {}, pesanWa = [], wa = opsWaSetting_();
   notifs.forEach(function (n) {
     users.forEach(function (u) {
       if (u.role !== n.toRole) return;
       if (n.toUser && n.toUser !== u.username) return;
       if (u.username === n.dari && !termasukPengirim) return;
       target[u.username] = 1;
+      if (u.wa) pesanWa.push({ to: u.wa, text: opsWaTeks_(n, wa) });
     });
   });
   var subs = (D.subs || []).filter(function (s) { return target[s.u]; });
-  if (!subs.length) return { terkirim: 0, gagal: 0 };
-  var v = opsVapid_();
+  var v = subs.length ? opsVapid_() : null;
   var reqs = subs.map(function (s) {
     var aud = s.endpoint.match(/^https:\/\/[^\/]+/)[0];
     var jwt = opsVapidJwt_(v, aud);
     return { url: s.endpoint, method: 'post', muteHttpExceptions: true, payload: '', contentType: 'application/octet-stream',
       headers: { Authorization: 'vapid t=' + jwt + ', k=' + v.pub, TTL: '86400', Urgency: 'high' } };
   });
-  var res = UrlFetchApp.fetchAll(reqs);
+  // WhatsApp dikirim bersamaan dengan notifikasi HP (satu putaran jaringan)
+  var reqWa = opsWaReqs_(pesanWa, wa);
+  if (!reqs.length && !reqWa.length) return { terkirim: 0, gagal: 0, wa: { terkirim: 0, gagal: 0 } };
+  var res;
+  try { res = UrlFetchApp.fetchAll(reqs.concat(reqWa)); }
+  catch (e) { if (reqWa.length) opsWaCatat_(0, reqWa.length, String(e.message || e)); return { terkirim: 0, gagal: reqs.length, wa: { terkirim: 0, gagal: reqWa.length } }; }
   var hapus = {}, ok = 0, gagal = 0;
-  res.forEach(function (r, i) {
+  res.slice(0, reqs.length).forEach(function (r, i) {
     var c = r.getResponseCode();
     if (c >= 200 && c < 300) ok++; else { gagal++; if (c === 404 || c === 410) hapus[subs[i].endpoint] = 1; }
   });
   if (gagal) D.subs = D.subs.filter(function (s) { return !hapus[s.endpoint]; });
-  return { terkirim: ok, gagal: gagal };
+  return { terkirim: ok, gagal: gagal, wa: opsWaHasil_(res.slice(reqs.length)) };
+}
+
+// ---------------------------------------------------------------------
+// Bot WhatsApp (Fonnte — api.fonnte.com). Token hanya di Script Properties.
+// ---------------------------------------------------------------------
+var OPS_WA_API = 'https://api.fonnte.com/send';
+var OPS_APP_URL = 'https://viopran.com/app/';
+function opsWaSetting_() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('NVP_WA') || '{}') || {}; } catch (e) { return {}; }
+}
+function opsWaSimpan_(inp) {
+  var s = opsWaSetting_();
+  if (typeof inp.token === 'string' && inp.token.trim()) s.token = inp.token.trim().slice(0, 200);
+  if (inp.hapusToken) delete s.token;
+  if (inp.aktif !== undefined) s.aktif = !!inp.aktif;
+  PropertiesService.getScriptProperties().setProperty('NVP_WA', JSON.stringify(s));
+}
+/** Info untuk portal admin — token TIDAK ikut dikirim, hanya 4 karakter terakhir. */
+function opsWaInfo_() {
+  var s = opsWaSetting_(), st = {};
+  try { st = JSON.parse(PropertiesService.getScriptProperties().getProperty('NVP_WA_STATUS') || '{}') || {}; } catch (e) {}
+  return { aktif: !!s.aktif, adaToken: !!s.token, ujungToken: s.token ? String(s.token).slice(-4) : '', status: st };
+}
+function opsWaTeks_(n, wa) {
+  var url = OPS_APP_URL + '#/' + String(n.link || '');
+  return '*' + String(n.title || 'NVP Operasional') + '*\n' + String(n.body || '') + '\n\nBuka aplikasi NVP Operasional:\n' + url + '\n\n_Pesan otomatis PT Nuri Vira Pratama_';
+}
+function opsWaReqs_(pesan, wa) {
+  wa = wa || opsWaSetting_();
+  if (!wa.aktif || !wa.token || !pesan.length) return [];
+  // pesan sama ke nomor sama (mis. kiriman ganda) cukup sekali
+  var ada = {}, unik = pesan.filter(function (m) { var k = m.to + '|' + m.text; if (ada[k]) return false; ada[k] = 1; return true; });
+  return unik.slice(0, 40).map(function (m) {
+    return { url: OPS_WA_API, method: 'post', muteHttpExceptions: true, headers: { Authorization: wa.token },
+      payload: { target: String(m.to), message: String(m.text), countryCode: '62' } };
+  });
+}
+function opsWaHasil_(res) {
+  if (!res.length) return { terkirim: 0, gagal: 0 };
+  var ok = 0, gagal = 0, alasan = '';
+  res.forEach(function (r) {
+    var j = {}; try { j = JSON.parse(r.getContentText()) || {}; } catch (e) {}
+    if (r.getResponseCode() < 300 && (j.status === true || j.Status === true)) ok++;
+    else { gagal++; alasan = String(j.reason || j.detail || ('HTTP ' + r.getResponseCode())).slice(0, 200); }
+  });
+  opsWaCatat_(ok, gagal, alasan);
+  return { terkirim: ok, gagal: gagal, alasan: alasan };
+}
+function opsWaCatat_(ok, gagal, alasan) {
+  try { PropertiesService.getScriptProperties().setProperty('NVP_WA_STATUS', JSON.stringify({ t: new Date().toISOString(), terkirim: ok, gagal: gagal, alasan: alasan || '' })); } catch (e) {}
+}
+/** Kirim langsung (dipakai tombol uji di portal). abaikanAktif: uji boleh walau bot belum diaktifkan. */
+function opsWaKirim_(pesan, abaikanAktif) {
+  var wa = opsWaSetting_();
+  if (abaikanAktif) wa = { aktif: true, token: wa.token };
+  var reqs = opsWaReqs_(pesan, wa);
+  if (!reqs.length) return { terkirim: 0, gagal: 0, alasan: wa.token ? '' : 'token Fonnte belum diisi' };
+  try { return opsWaHasil_(UrlFetchApp.fetchAll(reqs)); }
+  catch (e) { opsWaCatat_(0, reqs.length, String(e.message || e)); return { terkirim: 0, gagal: reqs.length, alasan: String(e.message || e) }; }
 }
 /** Dipanggil service worker di HP saat push masuk: ambil pesan yang belum ditampilkan. */
 function opsInbox_(body) {

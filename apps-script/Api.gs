@@ -24,6 +24,12 @@
  *    yang sama, khusus untuk aplikasi (tidak bisa masuk portal keuangan).
  *  - Semua action "ops..." ditangani OpsApi.gs.
  *
+ *  BOT WHATSAPP (Fonnte)
+ *  - Token Fonnte diisi admin di portal: menu Pengguna → Bot WhatsApp
+ *    (disimpan di Script Properties, tidak pernah dikirim balik ke browser).
+ *  - Nomor WA tiap akun diisi di form akun. Setiap notifikasi aplikasi juga
+ *    dikirim ke WA penerimanya.
+ *
  *  LUPA PASSWORD ADMIN?
  *   Isi password di setupNvpUsers() lalu Run sekali. Akun lain (dan menu yang
  *   sudah diatur) tidak berubah. Setelah itu kembalikan teks GANTI-PASSWORD-...
@@ -128,6 +134,15 @@ function doPost(e) {
       if (body.action === 'deleteUser') nvpWithLock_(function () { nvpDeleteUserAction_(body.target, user.username); });
       out = { ok: true, users: nvpLoadUsers_().map(nvpPublicUser_) };
 
+    } else if (body.action === 'waGet' || body.action === 'waSave' || body.action === 'waTest') {
+      // Bot WhatsApp (Fonnte) untuk notifikasi aplikasi — hanya admin
+      if (user.role !== 'admin') return nvpJson_({ ok: false, error: 'TIDAK_DIIZINKAN' });
+      if (body.action === 'waSave') nvpWithLock_(function () { opsWaSimpan_(body.wa || {}); });
+      if (body.action === 'waTest') {
+        var hasil = opsWaKirim_([{ to: nvpNormWa_(body.target), text: '*Pesan uji Bot WhatsApp*\nJika pesan ini masuk, notifikasi aplikasi NVP Operasional sudah tersambung ke WhatsApp.\n\n_Pesan otomatis PT Nuri Vira Pratama_' }], true);
+        out = { ok: hasil.terkirim > 0, error: hasil.terkirim > 0 ? '' : ('Gagal mengirim: ' + (hasil.alasan || 'bot belum aktif / token kosong')), wa: opsWaInfo_() };
+      } else out = { ok: true, wa: opsWaInfo_() };
+
     } else {
       out = { ok: false, error: 'ACTION_TIDAK_DIKENAL' };
     }
@@ -163,7 +178,16 @@ function nvpMenus_(u) {
   return NVP_MENUS.filter(function (k) { return m.indexOf(k) >= 0; });
 }
 function nvpPublicUser_(u) {
-  return { username: u.username, name: u.name, initial: u.initial, role: nvpRole_(u), menus: nvpMenus_(u) };
+  return { username: u.username, name: u.name, initial: u.initial, role: nvpRole_(u), menus: nvpMenus_(u), wa: u.wa || '' };
+}
+/** Nomor WhatsApp → format 62xxxxxxxxxx (0812… / 812… / +62 812… diterima). Kosong = tanpa WA. */
+function nvpNormWa_(s) {
+  var d = String(s || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.charAt(0) === '0') d = '62' + d.slice(1);
+  else if (d.charAt(0) === '8') d = '62' + d;
+  if (!/^62\d{8,13}$/.test(d)) throw new Error('Nomor WhatsApp tidak valid (contoh: 0812 3456 7890).');
+  return d;
 }
 function nvpCheckPassword_(p) {
   if (typeof p !== 'string' || p.length < 8) throw new Error('Password minimal 8 karakter.');
@@ -191,6 +215,7 @@ function nvpSaveUserAction_(u, isNew, actor) {
   rec.role = role;
   rec.menus = role === 'staff' ? menus : [];
   if (u.password) rec.hash = nvpHash_(u.password);
+  if (u.wa !== undefined) rec.wa = nvpNormWa_(u.wa);
   if (i >= 0) list[i] = rec; else list.push(rec);
   if (!list.some(function (x) { return nvpRole_(x) === 'admin'; })) throw new Error('Minimal harus ada satu admin.');
   nvpSaveUsers_(list);
