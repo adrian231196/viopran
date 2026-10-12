@@ -333,6 +333,12 @@ function opsSync_(D, user, body) {
   // ---- pengajuan gaji / pembayaran
   (ch.aju || []).forEach(function (a) {
     var srv = cari('aju', a.id);
+    // hapus pengajuan: hanya teknisi, pengajuan gaji miliknya sendiri yang belum dibayar
+    if (a && a.hapus) {
+      if (!srv || role !== 'teknisi' || srv.pemohonId !== me || srv.jenis !== 'gaji' || srv.status === 'dibayar') return;
+      D.aju = D.aju.filter(function (x) { return x.id !== srv.id; });
+      return;
+    }
     if (!srv) {
       if (String(a.id).indexOf('tmp-') !== 0 || (role !== 'teknisi' && role !== 'manager')) return;
       var rinc = opsRincian_(a.rincian);
