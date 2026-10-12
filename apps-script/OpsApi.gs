@@ -284,6 +284,13 @@ function opsSync_(D, user, body) {
   // ---- tugas pemeriksaan
   (ch.tugas || []).forEach(function (t) {
     var srv = cari('tugas', t.id);
+    // hapus tugas: hanya Manager Operasional & Direktur
+    if (t && t.hapus) {
+      if (!srv || (role !== 'manager' && role !== 'direktur')) return;
+      D.tugas = D.tugas.filter(function (x) { return x.id !== srv.id; });
+      D.pekerjaan.forEach(function (pk) { if (pk.taskId === srv.id) { pk.taskId = null; pk.rev = (pk.rev || 0) + 1; } });
+      return;
+    }
     if (!srv) {
       if (role !== 'manager' || String(t.id).indexOf('tmp-') !== 0) return;
       var teknisi = opsUsers_().filter(function (u) { return u.role === 'teknisi'; }).map(function (u) { return u.username; });
