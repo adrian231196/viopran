@@ -1580,6 +1580,11 @@
       const [userForm, setUserForm] = useState(null);
       const [userDel, setUserDel] = useState(null);
       const [pwForm, setPwForm] = useState(null);
+      // Bot WhatsApp (Fonnte) — notifikasi aplikasi juga dikirim ke WA
+      const [waInfo, setWaInfo] = useState(null);
+      const [waForm, setWaForm] = useState({ token: '', target: '' });
+      const [waBusy, setWaBusy] = useState(false);
+      const [waMsg, setWaMsg] = useState(null); // {ok, text}
       const authFailedRef = useRef(false);
       const [formError, setFormError] = useState('');
       const emptyAssetForm = { date: '', name: '', cost: '', kelompok: 'k1', akunKas: 'bank' };
@@ -1848,13 +1853,29 @@
       };
       useEffect(() => {
         if (activeTab === 'pengguna' && isAPI && isAdmin && userList === null && !userBusy) userApi({ action: 'listUsers' });
+        if (activeTab === 'pengguna' && isAPI && isAdmin && waInfo === null && !waBusy) waApi({ action: 'waGet' });
       }, [activeTab, isAdmin]);
+      const waApi = async (payload, sukses) => {
+        setWaBusy(true); if (payload.action !== 'waGet') setWaMsg(null);
+        try {
+          const r = await callApi({ ...payload, ...apiCredsRef.current });
+          if (r && r.wa) setWaInfo(r.wa);
+          if (!r || !r.ok) { setWaMsg({ ok: false, text: pesanServer(r) }); if (!r || !r.wa) setWaInfo(w => w || false); return false; }
+          if (sukses) setWaMsg({ ok: true, text: sukses });
+          return true;
+        } catch (err) {
+          setWaInfo(w => w || false);
+          setWaMsg({ ok: false, text: 'Koneksi ke server terputus sesaat (' + err.message + '). Coba lagi.' });
+          return false;
+        } finally { setWaBusy(false); }
+      };
+      const fmtWa = (n) => { const d = String(n || ''); return d.startsWith('62') ? '0' + d.slice(2) : d; };
 
       const openUserForm = (u) => {
         setUserMsg(''); setUserNotice('');
         setUserForm(u
-          ? { isNew: false, username: u.username, name: u.name || '', role: u.role, menus: u.role === 'admin' ? [...STAFF_DEFAULT_MENUS] : [...(u.menus || [])], password: '', showPw: false }
-          : { isNew: true, username: '', name: '', role: 'staff', menus: [...STAFF_DEFAULT_MENUS], password: '', showPw: false });
+          ? { isNew: false, username: u.username, name: u.name || '', role: u.role, menus: u.role === 'admin' ? [...STAFF_DEFAULT_MENUS] : [...(u.menus || [])], password: '', showPw: false, wa: fmtWa(u.wa) }
+          : { isNew: true, username: '', name: '', role: 'staff', menus: [...STAFF_DEFAULT_MENUS], password: '', showPw: false, wa: '' });
       };
       const saveUserForm = async () => {
         const f = userForm;
@@ -1863,7 +1884,9 @@
         if (!f.name.trim()) { setUserMsg('Nama wajib diisi.'); return; }
         if ((f.isNew || f.password) && f.password.length < 8) { setUserMsg('Password minimal 8 karakter.'); return; }
         if (f.role === 'staff' && !f.menus.length) { setUserMsg('Centang minimal satu menu.'); return; }
-        const ok = await userApi({ action: 'saveUser', isNew: f.isNew, user: { username, name: f.name.trim(), role: f.role, menus: f.role === 'staff' ? f.menus : [], password: f.password || '' } });
+        const waDigit = String(f.wa || '').replace(/\D/g, '');
+        if (waDigit && !/^(0|62|8)\d{8,13}$/.test(waDigit)) { setUserMsg('Nomor WhatsApp tidak valid (contoh: 0812 3456 7890).'); return; }
+        const ok = await userApi({ action: 'saveUser', isNew: f.isNew, user: { username, name: f.name.trim(), role: f.role, menus: f.role === 'staff' ? f.menus : [], password: f.password || '', wa: f.wa || '' } });
         if (!ok) return;
         const diriSendiri = currentUser && username === currentUser.username;
         if (diriSendiri && f.password) apiCredsRef.current = { ...apiCredsRef.current, password: f.password };
@@ -1951,6 +1974,7 @@
         }
         setActiveTab('dashboard');
         setUserList(null); setUserForm(null); setUserDel(null); setPwForm(null); setUserMsg(''); setUserNotice('');
+        setWaInfo(null); setWaMsg(null); setWaForm({ token: '', target: '' });
         setIsLoggedIn(false); setCurrentUser(null); setLoginFormState({ username: '', password: '' });
       };
 
@@ -3796,6 +3820,59 @@
         );
       };
 
+      const renderBotWa = () => {
+        const w = waInfo || {};
+        const st = w.status || {};
+        const inputCls = 'w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500';
+        const tanpaWa = (userList || []).filter(u => PERAN_APLIKASI.includes(u.role) && !u.wa);
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5" data-testid="bot-wa">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center"><IconWhatsApp size={22}/></span>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Bot WhatsApp</h3>
+                  <p className="text-xs text-slate-500">Setiap notifikasi aplikasi NVP Operasional (pengajuan menunggu persetujuan pimpinan, pembayaran, tugas, dll.) juga dikirim ke WhatsApp penerimanya.</p>
+                </div>
+              </div>
+              {waInfo === null ? <span className="text-xs text-slate-400">{waBusy ? 'Memuat...' : ''}</span> : waInfo === false ? null : (
+                <span className={`self-start sm:self-center px-3 py-1 rounded-full text-xs font-bold border ${w.aktif && w.adaToken ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-500'}`}>{w.aktif && w.adaToken ? 'Aktif' : 'Nonaktif'}</span>
+              )}
+            </div>
+            {waMsg && <div className={`rounded-xl p-3 text-sm font-semibold border ${waMsg.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-700'}`}>{waMsg.text}</div>}
+            {waInfo === false ? (
+              <button onClick={() => waApi({ action: 'waGet' })} disabled={waBusy} className="text-sm font-bold underline text-slate-600">{waBusy ? 'Memuat...' : 'Muat pengaturan Bot WhatsApp'}</button>
+            ) : waInfo && (
+              <>
+                <div className="grid md:grid-cols-2 gap-5">
+                  <div className="space-y-3">
+                    <label className="block"><span className="block text-sm font-bold text-slate-700 mb-1">Token Fonnte</span>
+                      <input type="password" autoComplete="off" value={waForm.token} onChange={(e) => setWaForm({ ...waForm, token: e.target.value })} className={inputCls}
+                        placeholder={w.adaToken ? `Tersimpan (…${w.ujungToken}) — isi untuk mengganti` : 'Tempel token dari fonnte.com → Device'} /></label>
+                    <div className="flex flex-wrap gap-2">
+                      <button disabled={waBusy || !waForm.token.trim()} onClick={async () => { if (await waApi({ action: 'waSave', wa: { token: waForm.token.trim(), aktif: true } }, 'Token tersimpan dan Bot WhatsApp diaktifkan.')) setWaForm(x => ({ ...x, token: '' })); }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50">Simpan token</button>
+                      {w.adaToken && (w.aktif
+                        ? <button disabled={waBusy} onClick={() => waApi({ action: 'waSave', wa: { aktif: false } }, 'Bot WhatsApp dinonaktifkan. Notifikasi HP tetap berjalan.')} className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-xl disabled:opacity-50">Nonaktifkan</button>
+                        : <button disabled={waBusy} onClick={() => waApi({ action: 'waSave', wa: { aktif: true } }, 'Bot WhatsApp diaktifkan.')} className="px-4 py-2 border border-emerald-300 text-emerald-700 text-sm font-bold rounded-xl disabled:opacity-50">Aktifkan</button>)}
+                    </div>
+                    <p className="text-xs text-slate-500">Token disimpan di server Google (Script Properties) dan tidak pernah ditampilkan kembali.</p>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="block"><span className="block text-sm font-bold text-slate-700 mb-1">Kirim pesan uji ke nomor</span>
+                      <input type="tel" inputMode="tel" value={waForm.target} onChange={(e) => setWaForm({ ...waForm, target: e.target.value })} className={inputCls} placeholder="mis. 0812 3456 7890" /></label>
+                    <button disabled={waBusy || !w.adaToken || !waForm.target.trim()} onClick={() => waApi({ action: 'waTest', target: waForm.target }, 'Pesan uji terkirim — cek WhatsApp nomor tersebut.')}
+                      className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-xl disabled:opacity-50">{waBusy ? 'Mengirim...' : 'Kirim pesan uji'}</button>
+                    {st.t && <p className="text-xs text-slate-500">Pengiriman terakhir: {new Date(st.t).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })} — {st.terkirim || 0} terkirim{st.gagal ? <span className="text-rose-600 font-semibold">, {st.gagal} gagal ({st.alasan || 'tanpa keterangan'})</span> : ''}</p>}
+                  </div>
+                </div>
+                {tanpaWa.length > 0 && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3">Akun aplikasi tanpa nomor WhatsApp (tidak akan menerima pesan bot): <b>{tanpaWa.map(u => u.name || u.username).join(', ')}</b>. Klik ikon ubah pada akun tersebut untuk mengisi nomornya.</p>}
+              </>
+            )}
+          </div>
+        );
+      };
+
       const renderPengguna = () => {
         const labelMenu = (k) => (MENU_DEF.find(m => m[0] === k) || [k, k])[1];
         const f = userForm;
@@ -3833,7 +3910,7 @@
                       ) : userList.map(u => (
                         <tr key={u.username} className="hover:bg-slate-50/80">
                           <td className="px-6 py-4"><div className="flex items-center gap-3"><span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white ${u.role === 'admin' ? 'bg-red-600' : 'bg-slate-500'}`}>{u.initial || (u.name || u.username)[0].toUpperCase()}</span><span className="font-semibold text-slate-800">{u.name}</span>{currentUser && u.username === currentUser.username && <span className="text-[10px] font-bold text-slate-400">(Anda)</span>}</div></td>
-                          <td className="px-6 py-4 text-sm text-slate-600 font-mono">{u.username}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600 font-mono">{u.username}{u.wa && <span className="flex items-center gap-1 mt-1 text-xs text-emerald-700 font-sans font-semibold"><IconWhatsApp size={13}/>{fmtWa(u.wa)}</span>}</td>
                           <td className="px-6 py-4"><span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${u.role === 'admin' ? 'bg-red-50 border-red-100 text-red-700' : PERAN_APLIKASI.includes(u.role) ? 'bg-blue-50 border-blue-100 text-blue-700' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>{PERAN_LABEL[u.role] || 'Staff'}</span></td>
                           <td className="px-6 py-4">
                             {u.role === 'admin' ? <span className="text-sm text-slate-500">Semua menu + Pengguna + Backup/Pulihkan</span> : PERAN_APLIKASI.includes(u.role) ? <span className="text-sm text-blue-700 font-semibold">Aplikasi NVP Operasional (viopran.com/app)</span> : (
@@ -3850,6 +3927,7 @@
                   </table>
                 </div>
                 <p className="text-xs text-slate-500">Lupa password karyawan? Klik ikon ubah lalu isi password baru. Perubahan menu berlaku saat akun tersebut masuk lagi.</p>
+                {renderBotWa()}
               </>
             )}
 
@@ -3866,6 +3944,8 @@
                         <input type="text" value={f.username} disabled={!f.isNew} autoComplete="off" placeholder="mis. gudang1" onChange={(e) => setUserForm({ ...f, username: e.target.value.toLowerCase().replace(/\s/g, '') })} className={`${inputCls} disabled:opacity-60`} /></label>
                       <label className="block"><span className="block text-sm font-bold text-slate-700 mb-1">Nama lengkap</span>
                         <input type="text" value={f.name} onChange={(e) => setUserForm({ ...f, name: e.target.value })} className={inputCls} placeholder="mis. Budi Santoso" /></label>
+                      <label className="block sm:col-span-2"><span className="block text-sm font-bold text-slate-700 mb-1">No. WhatsApp <span className="font-normal text-slate-500">— untuk pesan Bot WA (boleh dikosongkan)</span></span>
+                        <input type="tel" inputMode="tel" value={f.wa} onChange={(e) => setUserForm({ ...f, wa: e.target.value })} className={inputCls} placeholder="mis. 0812 3456 7890" /></label>
                     </div>
                     <div>
                       <span className="block text-sm font-bold text-slate-700 mb-2">Peran</span>
