@@ -58,10 +58,11 @@ function opsHandle_(body) {
   }
 
   // ---- hanya membaca: tanpa antre kunci, supaya cepat (cek data terbaru, ambil foto/PDF)
-  if (a === 'opsFile' || a === 'opsFiles' || (a === 'opsSync' && opsKosong_(body))) {
+  if (a === 'opsFile' || a === 'opsFiles' || a === 'opsRefKeu' || (a === 'opsSync' && opsKosong_(body))) {
     var D0 = opsLoad_(true);
     var u0 = opsSessionUser_(D0, body.token);
     if (!u0) return { ok: false, error: 'AUTH' };
+    if (a === 'opsRefKeu') return u0.role === 'direktur' ? opsRefKeu_() : { ok: false, error: 'TIDAK_DIIZINKAN' };
     if (a === 'opsSync') {
       if (body.ver && body.ver === D0.ver) return { ok: true, same: true, ver: D0.ver };
       return { ok: true, data: opsView_(D0, u0), ver: D0.ver, idMap: {}, conflicts: [] };
@@ -254,7 +255,7 @@ function opsSync_(D, user, body) {
   var batas = Date.now() - 45 * 864e5;
   Object.keys(D.tmpMap).forEach(function (k) { if ((D.tmpMap[k].t || 0) < batas) delete D.tmpMap[k]; });
   var ingatTmp = function (tmp, id) { D.tmpMap[tmp] = { id: id, u: me, t: Date.now() }; };
-  ['pekerjaan', 'tugas', 'aju'].forEach(function (col) {
+  ['pekerjaan', 'tugas', 'aju', 'kasKeluar'].forEach(function (col) {
     (ch[col] || []).forEach(function (rec) {
       var k = rec && D.tmpMap[rec.id];
       if (!k || k.u !== me) return;
@@ -371,6 +372,35 @@ function opsSync_(D, user, body) {
     srv.rev = (srv.rev || 0) + 1;
   });
 
+  // ---- pengeluaran yang dicatat manual oleh Direktur → Kas Keluar + Pengeluaran portal
+  (ch.kasKeluar || []).forEach(function (k) {
+    if (role !== 'direktur' || !k) return;
+    var srv = cari('kasKeluar', k.id);
+    if (!srv) {
+      if (String(k.id).indexOf('tmp-') !== 0 || k.hapus) return;
+      var v = opsValidasiManual_(k);
+      if (v.err) { conflicts.push({ col: 'kasKeluar', id: k.id, pesan: 'Pengeluaran tidak tersimpan: ' + v.err }); return; }
+      D.seq.KK = (D.seq.KK || 0) + 1;
+      var rec = v.rec;
+      rec.id = 'KK-' + ('000' + D.seq.KK).slice(-4);
+      rec.bukti = opsSimpanFoto_(k.bukti, 'Bukti Pengeluaran', 3);
+      rec.buktiFileId = rec.bukti.length ? rec.bukti[0].fileId : '';
+      rec.manual = true; rec.dibuatOleh = me; rec.createdAt = now; rec.sinkron = false; rec.rev = 1;
+      idMap[k.id] = rec.id; ingatTmp(k.id, rec.id);
+      D.kasKeluar.unshift(rec);
+      events.push({ jenis: 'manual', id: rec.id });
+      return;
+    }
+    if (!srv.manual) return;
+    if (k.hapus) { events.push({ jenis: 'hapusManual', id: srv.id }); return; }
+    if (k.lunas && srv.sumber === 'utang' && !srv.paidDate) {
+      var tglL = /^\d{4}-\d{2}-\d{2}$/.test(k.lunas.tgl) ? k.lunas.tgl : now.slice(0, 10);
+      if (tglL < srv.tgl) { conflicts.push({ col: 'kasKeluar', id: srv.id, pesan: 'Tanggal pelunasan tidak boleh sebelum tanggal pengeluaran.' }); return; }
+      srv.paidDate = tglL; srv.akun = k.lunas.akun === 'tunai' ? 'tunai' : 'bank'; srv.rev = (srv.rev || 0) + 1;
+      events.push({ jenis: 'lunasManual', id: srv.id });
+    }
+  });
+
   // ---- notifikasi baru dari perangkat ini (pengirim = akun ini)
   var pushes = [];
   (body.notifs || []).slice(0, 30).forEach(function (n) {
@@ -390,6 +420,8 @@ function opsSync_(D, user, body) {
   events.forEach(function (ev) {
     try {
       if (ev.jenis === 'bayar') opsCatatPembayaran_(D, cari('aju', ev.id), user);
+      if (ev.jenis === 'manual' || ev.jenis === 'lunasManual') opsTulisManual_(D, cari('kasKeluar', ev.id));
+      if (ev.jenis === 'hapusManual') opsHapusManual_(D, ev.id);
       if (ev.jenis === 'pdfTugas') { var tg = cari('tugas', ev.id); tg.pdf = opsPdfTugas_(tg); }
       if (ev.jenis === 'pdfPekerjaan') { var pk = cari('pekerjaan', ev.id); pk.pdf = opsPdfPekerjaan_(pk); }
     } catch (e) { conflicts.push({ id: ev.id, pesan: 'Proses lanjutan gagal: ' + e.message }); }
@@ -560,18 +592,108 @@ function opsJagaPengeluaran_(incoming, currentRaw) {
   var dariOps = (cur.expenses || []).filter(function (e) { return e && e.sumber === 'NVP Operasional'; });
   if (!dariOps.length || !incoming || !Array.isArray(incoming.expenses)) return incoming;
   var out = {}; Object.keys(incoming).forEach(function (k) { out[k] = incoming[k]; });
-  // Satu-satunya yang boleh diubah dari portal: pengembalian dana talangan (tanggal & kas yang dipakai)
+  // Satu-satunya yang boleh diubah dari portal: pengembalian dana talangan / pelunasan utang (tanggal & kas yang dipakai)
   var masuk = {}; incoming.expenses.forEach(function (e) { if (e && e.sumber === 'NVP Operasional' && e.id) masuk[e.id] = e; });
   var dijaga = dariOps.map(function (e) {
     var inc = masuk[e.id];
-    if (!inc || (e.paymentStatus !== 'talangan' && e.paymentStatus !== 'campuran')) return e;
+    if (!inc || (e.paymentStatus !== 'talangan' && e.paymentStatus !== 'campuran' && e.paymentStatus !== 'utang')) return e;
     var c = {}; Object.keys(e).forEach(function (k) { c[k] = e[k]; });
-    c.paidDate = /^\d{4}-\d{2}-\d{2}$/.test(inc.paidDate || '') ? inc.paidDate : '';
+    var tglOk = /^\d{4}-\d{2}-\d{2}$/.test(inc.paidDate || '');
+    if (e.paymentStatus === 'utang' && !tglOk) return e; // pelunasan utang tidak bisa dibatalkan dari portal (tab lama)
+    c.paidDate = tglOk ? inc.paidDate : '';
     c.akunKas = inc.akunKas === 'tunai' ? 'tunai' : 'bank';
     return c;
   });
   out.expenses = incoming.expenses.filter(function (e) { return !(e && e.sumber === 'NVP Operasional'); }).concat(dijaga);
   return out;
+}
+
+// ---------------------------------------------------------------------
+// Pengeluaran manual dari aplikasi Direktur (isi sama dengan form Pengeluaran di portal)
+// ---------------------------------------------------------------------
+var OPS_JENIS_BIAYA = {
+  Operasional: ['Gaji & upah karyawan', 'Sewa tempat', 'Listrik, air & internet', 'Telepon & pulsa', 'Transportasi & BBM', 'Pengiriman / ekspedisi', 'ATK & perlengkapan kantor', 'Perawatan & perbaikan', 'Pemasaran & iklan', 'Konsumsi & jamuan', 'Perizinan & sertifikasi usaha', 'Biaya bank & administrasi', 'Pajak & retribusi daerah (bukan PPh)', 'Asuransi', 'Lain-lain'],
+  HPP: ['Pembelian tabung APAR', 'Pembelian media pemadam (powder/CO2/foam)', 'Sparepart & aksesoris', 'Jasa uji / sertifikasi pihak ketiga', 'Ongkos angkut pembelian', 'Lain-lain']
+};
+var OPS_SATUAN_STOK = { dcp: 'kg', foam: 'liter', n2: 'tabung', tabung: 'unit' };
+var OPS_STOK_DEFAULT = [{ id: 'STK-DCP', nama: 'Dry Chemical Powder (DCP)', jenis: 'dcp' }, { id: 'STK-FOAM', nama: 'Foam (AFFF)', jenis: 'foam' }, { id: 'STK-N2', nama: 'Gas N2', jenis: 'n2' }];
+
+function opsDataPortal_() {
+  var raw = loadDataFromDrive_();
+  var data = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch (e) { throw new Error('Data keuangan di Drive tidak dapat dibaca.'); }
+  data.expenses = Array.isArray(data.expenses) ? data.expenses : [];
+  return data;
+}
+function opsStokItems_(data) {
+  var src = data && data.stok && Array.isArray(data.stok.items) && data.stok.items.length ? data.stok.items : OPS_STOK_DEFAULT;
+  return src.filter(function (i) { return i && i.id && OPS_SATUAN_STOK[i.jenis]; })
+    .map(function (i) { return { id: String(i.id), nama: String(i.nama || i.id), satuan: OPS_SATUAN_STOK[i.jenis] }; });
+}
+/** Daftar barang stok & nama pihak dana talangan untuk formulir pengeluaran di HP Direktur. */
+function opsRefKeu_() {
+  var data = opsDataPortal_();
+  var pihak = {};
+  data.expenses.forEach(function (e) { if (e && (e.paymentStatus === 'talangan' || e.paymentStatus === 'campuran') && e.talanganDari) pihak[String(e.talanganDari)] = 1; });
+  return { ok: true, stok: opsStokItems_(data), pihak: Object.keys(pihak).slice(0, 50), jenisBiaya: OPS_JENIS_BIAYA };
+}
+function opsValidasiManual_(k) {
+  var str = function (v, n) { return String(v == null ? '' : v).trim().slice(0, n || 200); };
+  var rp = function (v) { return Math.round(Number(v) || 0); };
+  var tgl = str(k.tgl, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tgl)) return { err: 'tanggal wajib diisi.' };
+  var desc = str(k.deskripsi, 200);
+  if (!desc) return { err: 'deskripsi wajib diisi.' };
+  var kat = k.kategori === 'HPP' ? 'HPP' : 'Operasional';
+  var jenis = str(k.jenisBiaya, 80);
+  if (OPS_JENIS_BIAYA[kat].indexOf(jenis) < 0) return { err: 'pilih jenis biaya.' };
+  var amount = rp(k.amount), ppn = rp(k.ppn);
+  if (!(amount > 0)) return { err: 'nominal harus lebih dari 0.' };
+  if (ppn < 0) return { err: 'PPN masukan tidak boleh negatif.' };
+  var total = amount + ppn;
+  var sumber = ['campuran', 'utang', 'talangan'].indexOf(k.sumber) >= 0 ? k.sumber : 'kas';
+  var akun = k.akun === 'tunai' ? 'tunai' : 'bank';
+  var bayarKas = sumber === 'kas' ? total : sumber === 'campuran' ? rp(k.bayarKas) : 0;
+  if (sumber === 'campuran' && !(bayarKas > 0 && bayarKas < total)) return { err: 'nominal dari kas harus lebih dari 0 dan kurang dari total.' };
+  var dari = sumber === 'talangan' || sumber === 'campuran' ? str(k.talanganDari, 80) : '';
+  if ((sumber === 'talangan' || sumber === 'campuran') && !dari) return { err: 'isi nama pihak ketiga yang menalangi.' };
+  var paidDate = sumber !== 'kas' && /^\d{4}-\d{2}-\d{2}$/.test(k.paidDate || '') ? k.paidDate : '';
+  if (paidDate && paidDate < tgl) return { err: 'tanggal pelunasan/pengembalian tidak boleh sebelum tanggal pengeluaran.' };
+  var stokItem = kat === 'HPP' ? str(k.stokItem, 40) : '';
+  var stokQty = stokItem ? Number(k.stokQty) || 0 : 0;
+  if (stokItem && !(stokQty > 0)) return { err: 'isi jumlah barang yang masuk ke stok.' };
+  return { rec: { tgl: tgl, deskripsi: desc, kategori: kat, jenisBiaya: jenis, amount: amount, ppn: ppn, total: total, sumber: sumber, akun: akun,
+    akunKembali: k.akunKembali === 'tunai' ? 'tunai' : 'bank', nominal: bayarKas, talangan: (sumber === 'talangan' || sumber === 'campuran') ? total - bayarKas : 0,
+    utang: sumber === 'utang' ? total : 0, talanganDari: dari, paidDate: paidDate, stokItem: stokItem, stokQty: stokQty, stokNama: str(k.stokNama, 80), stokSatuan: str(k.stokSatuan, 10),
+    nonDeductible: !!k.nonDeductible, ref: str(k.ref, 60), metode: k.metode === 'Tunai' ? 'Tunai' : 'Transfer bank' } };
+}
+function opsExpenseManual_(kk, data) {
+  var st = kk.sumber === 'kas' ? 'lunas' : kk.sumber;
+  var stokOk = kk.stokItem && opsStokItems_(data).some(function (i) { return i.id === kk.stokItem; });
+  return { id: 'EXP-OPS-' + kk.id.slice(3), date: kk.tgl, desc: kk.deskripsi + (kk.ref ? ' (ref ' + kk.ref + ')' : ''), category: kk.kategori, jenis: kk.jenisBiaya,
+    amount: kk.amount, ppnMasukan: kk.ppn, nonDeductible: !!kk.nonDeductible, paymentStatus: st,
+    // lunas: kas yang dipakai · campuran: kas untuk mengembalikan talangan · utang/talangan: kas saat dilunasi/dikembalikan
+    akunKas: st === 'lunas' ? kk.akun : (st === 'utang' ? kk.akun : kk.akunKembali), paidDate: st === 'lunas' ? '' : (kk.paidDate || ''),
+    bayarKas: st === 'campuran' ? kk.nominal : 0, akunKasLangsung: st === 'campuran' ? kk.akun : '', talanganDari: kk.talanganDari || '',
+    stokItem: stokOk ? kk.stokItem : '', stokQty: stokOk ? kk.stokQty : 0,
+    sumber: 'NVP Operasional', opsManual: true, opsKasKeluar: kk.id, buktiUrl: kk.buktiFileId ? 'https://drive.google.com/file/d/' + kk.buktiFileId + '/view' : '' };
+}
+function opsTulisManual_(D, kk) {
+  if (!kk) return;
+  var data = opsDataPortal_();
+  var e = opsExpenseManual_(kk, data);
+  var ada = false;
+  data.expenses = data.expenses.map(function (x) { if (x && x.opsKasKeluar === kk.id) { ada = true; return e; } return x; });
+  if (!ada) data.expenses.unshift(e);
+  saveDataToDrive_(JSON.stringify(data));
+  kk.sinkron = true; kk.expenseId = e.id;
+}
+function opsHapusManual_(D, kkId) {
+  var data = opsDataPortal_();
+  var n = data.expenses.length;
+  data.expenses = data.expenses.filter(function (x) { return !(x && x.opsKasKeluar === kkId && x.opsManual); });
+  if (data.expenses.length !== n) saveDataToDrive_(JSON.stringify(data));
+  D.kasKeluar = D.kasKeluar.filter(function (x) { return x.id !== kkId; });
 }
 
 // ---------------------------------------------------------------------
